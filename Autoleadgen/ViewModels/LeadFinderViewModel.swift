@@ -12,7 +12,7 @@ class LeadFinderViewModel: ObservableObject {
     // Search state
     @Published var isSearching: Bool = false
     @Published var currentPage: Int = 0
-    @Published var targetLeadsCount: Int = 50
+    @Published var targetLeadsCount: Int = 1
     @Published var scrapedLeads: [ScrapedLead] = []
     @Published var newLeadsCount: Int = 0
     @Published var duplicatesSkipped: Int = 0
