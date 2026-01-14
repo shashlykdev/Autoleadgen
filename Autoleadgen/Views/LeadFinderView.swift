@@ -79,6 +79,8 @@ struct LeadFinderView: View {
             viewModel.onContactsReady = { contacts in
                 onAddContacts(contacts)
             }
+            // Sync Apollo settings to ViewModel
+            syncApolloSettingsToViewModel()
         }
     }
 
@@ -292,9 +294,8 @@ struct LeadFinderView: View {
                 Toggle("", isOn: $apolloEnabled)
                     .labelsHidden()
                     .disabled(!apolloKeyLoaded || apolloApiKey.isEmpty)
-                    .onChange(of: apolloEnabled) { _, newValue in
-                        viewModel.apolloEnabled = newValue
-                        viewModel.apolloApiKey = apolloApiKey
+                    .onChange(of: apolloEnabled) { _, _ in
+                        syncApolloSettingsToViewModel()
                     }
             }
 
@@ -383,10 +384,8 @@ struct LeadFinderView: View {
                         apolloApiKey = key
                         apolloKeyLoaded = true
                         isLoadingApolloKey = false
-                        viewModel.apolloApiKey = key
-                        if apolloEnabled {
-                            viewModel.apolloEnabled = true
-                        }
+                        // Always sync to ViewModel when key loads
+                        syncApolloSettingsToViewModel()
                     }
                     // Fetch credits after key is loaded
                     await loadApolloCredits(apiKey: key)
@@ -403,6 +402,12 @@ struct LeadFinderView: View {
                 }
             }
         }
+    }
+
+    /// Sync Apollo settings from View to ViewModel
+    private func syncApolloSettingsToViewModel() {
+        viewModel.apolloEnabled = apolloEnabled && !apolloApiKey.isEmpty
+        viewModel.apolloApiKey = apolloApiKey
     }
 
     private func loadApolloCredits(apiKey: String) async {
