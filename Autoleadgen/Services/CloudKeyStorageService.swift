@@ -57,6 +57,7 @@ actor CloudKeyStorageService {
         let openai: String?
         let anthropic: String?
         let xai: String?
+        let apollo: String?
     }
 
     /// Fetch API keys from cloud storage
@@ -95,6 +96,8 @@ actor CloudKeyStorageService {
             return keys.anthropic
         case "xai":
             return keys.xai
+        case "apollo":
+            return keys.apollo
         default:
             return nil
         }

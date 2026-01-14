@@ -56,9 +56,15 @@ final class LeadsManagementService {
             tags: lead.tags,
             status: lead.status,
             source: lead.source,
+            generatedMessage: lead.generatedMessage,
             createdAt: Date(),
             updatedAt: Date(),
-            lastContactedAt: lead.lastContactedAt
+            lastContactedAt: lead.lastContactedAt,
+            headline: lead.headline,
+            about: lead.about,
+            education: lead.education,
+            connectionDegree: lead.connectionDegree,
+            followerCount: lead.followerCount
         )
         leads.append(newLead)
         await saveLeads()
@@ -94,9 +100,15 @@ final class LeadsManagementService {
                 tags: lead.tags,
                 status: lead.status,
                 source: lead.source,
+                generatedMessage: lead.generatedMessage,
                 createdAt: lead.createdAt,
                 updatedAt: Date(),
-                lastContactedAt: lead.lastContactedAt
+                lastContactedAt: lead.lastContactedAt,
+                headline: lead.headline,
+                about: lead.about,
+                education: lead.education,
+                connectionDegree: lead.connectionDegree,
+                followerCount: lead.followerCount
             )
             leads[index] = updatedLead
             await saveLeads()
@@ -173,9 +185,15 @@ final class LeadsManagementService {
                     tags: updatedLead.tags + [tag],
                     status: updatedLead.status,
                     source: updatedLead.source,
+                    generatedMessage: updatedLead.generatedMessage,
                     createdAt: updatedLead.createdAt,
                     updatedAt: Date(),
-                    lastContactedAt: updatedLead.lastContactedAt
+                    lastContactedAt: updatedLead.lastContactedAt,
+                    headline: updatedLead.headline,
+                    about: updatedLead.about,
+                    education: updatedLead.education,
+                    connectionDegree: updatedLead.connectionDegree,
+                    followerCount: updatedLead.followerCount
                 )
                 leads[index] = updatedLead
                 await saveLeads()

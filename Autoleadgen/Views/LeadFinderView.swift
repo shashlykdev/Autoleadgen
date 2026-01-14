@@ -9,6 +9,14 @@ struct LeadFinderView: View {
     @AppStorage("selectedModelId") private var selectedModelId: String = ""
     @AppStorage("sampleMessage") private var sampleMessage: String = ""
 
+    // Apollo Settings
+    @AppStorage("apolloEnabled") private var apolloEnabled: Bool = false
+    @State private var apolloApiKey: String = ""
+    @State private var isLoadingApolloKey: Bool = false
+    @State private var apolloKeyLoaded: Bool = false
+    @State private var apolloTestResult: String?
+    @State private var isTestingApollo: Bool = false
+
     // Models state
     @State private var availableModels: [CloudKeyStorageService.AIModel] = []
     @State private var isLoadingModels: Bool = false
@@ -32,6 +40,9 @@ struct LeadFinderView: View {
 
                 // AI Model Selection
                 aiModelSection
+
+                // Apollo Email Enrichment
+                apolloSettingsSection
 
                 // Search Controls
                 searchControlsSection
@@ -207,19 +218,45 @@ struct LeadFinderView: View {
 
         Task {
             do {
-                let models = try await CloudKeyStorageService.shared.fetchModels()
+                var models = try await CloudKeyStorageService.shared.fetchModels()
+
+                // Add Apple Intelligence if available (on-device, no API key needed)
+                if AIMessageService.isAppleIntelligenceAvailable {
+                    let appleModel = CloudKeyStorageService.AIModel(
+                        id: "apple-intelligence",
+                        name: "Apple Intelligence (On-Device)",
+                        provider: "apple"
+                    )
+                    models.insert(appleModel, at: 0)
+                }
+
                 await MainActor.run {
                     availableModels = models
                     isLoadingModels = false
 
-                    // Auto-select first model if none selected
-                    if selectedModelId.isEmpty, let first = models.first {
-                        selectedModelId = first.id
+                    // Auto-select Apple Intelligence if available and none selected
+                    if selectedModelId.isEmpty {
+                        if AIMessageService.isAppleIntelligenceAvailable {
+                            selectedModelId = "apple-intelligence"
+                        } else if let first = models.first {
+                            selectedModelId = first.id
+                        }
                     }
                 }
             } catch {
                 await MainActor.run {
-                    modelsError = error.localizedDescription
+                    // Even on error, add Apple Intelligence if available
+                    if AIMessageService.isAppleIntelligenceAvailable {
+                        let appleModel = CloudKeyStorageService.AIModel(
+                            id: "apple-intelligence",
+                            name: "Apple Intelligence (On-Device)",
+                            provider: "apple"
+                        )
+                        availableModels = [appleModel]
+                        modelsError = nil
+                    } else {
+                        modelsError = error.localizedDescription
+                    }
                     isLoadingModels = false
                 }
             }
@@ -278,6 +315,22 @@ struct LeadFinderView: View {
                         .font(.caption)
                     Spacer()
                 }
+            } else if viewModel.isEnrichingEmails {
+                // Phase 3: Apollo email enrichment progress
+                ProgressView(value: Double(viewModel.currentEnrichmentIndex), total: Double(viewModel.processedLeads.count))
+
+                HStack {
+                    ProgressView()
+                        .scaleEffect(0.7)
+                    Text("Phase 3: Enriching emails \(viewModel.currentEnrichmentIndex) of \(viewModel.processedLeads.count)...")
+                        .font(.caption)
+                    if viewModel.enrichedCount > 0 {
+                        Text("(\(viewModel.enrichedCount) found)")
+                            .font(.caption)
+                            .foregroundColor(.green)
+                    }
+                    Spacer()
+                }
             }
         }
     }
@@ -314,6 +367,174 @@ struct LeadFinderView: View {
             }
             .buttonStyle(.bordered)
             .disabled(viewModel.isWorking)
+        }
+    }
+
+    // MARK: - Apollo Settings
+
+    private var apolloSettingsSection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Text("Apollo Email Enrichment")
+                    .font(.subheadline)
+                    .fontWeight(.medium)
+
+                Text("100 free credits/month")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 2)
+                    .background(Color.blue.opacity(0.1))
+                    .cornerRadius(4)
+
+                Spacer()
+
+                Toggle("", isOn: $apolloEnabled)
+                    .labelsHidden()
+                    .disabled(!apolloKeyLoaded || apolloApiKey.isEmpty)
+                    .onChange(of: apolloEnabled) { _, newValue in
+                        viewModel.apolloEnabled = newValue
+                        viewModel.apolloApiKey = apolloApiKey
+                    }
+            }
+
+            if isLoadingApolloKey {
+                HStack {
+                    ProgressView()
+                        .scaleEffect(0.7)
+                    Text("Loading Apollo API key...")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                }
+            } else if apolloKeyLoaded && !apolloApiKey.isEmpty {
+                // Key loaded from cloud
+                HStack {
+                    Image(systemName: "checkmark.circle.fill")
+                        .foregroundColor(.green)
+                    Text("API key loaded from cloud")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+
+                    Spacer()
+
+                    Button("Test") {
+                        testApolloConnection()
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+                    .disabled(isTestingApollo)
+                }
+
+                // Test Result
+                if let result = apolloTestResult {
+                    Text(result)
+                        .font(.caption)
+                        .foregroundColor(result.contains("Success") ? .green : .red)
+                }
+
+                if apolloEnabled {
+                    Text("Leads will be enriched with email addresses after scraping")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                }
+            } else {
+                // No key configured
+                HStack {
+                    Image(systemName: "exclamationmark.triangle")
+                        .foregroundColor(.orange)
+                    Text("Apollo API key not configured in Vercel")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+
+                    Spacer()
+
+                    Button("Retry") {
+                        loadApolloKey()
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+                }
+            }
+
+            if !apolloEnabled && apolloKeyLoaded && !apolloApiKey.isEmpty {
+                Text("Enable to get email addresses for leads (bypasses LinkedIn DMs)")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+            }
+        }
+        .padding(10)
+        .background(Color(NSColor.controlBackgroundColor))
+        .cornerRadius(8)
+        .onAppear {
+            if !apolloKeyLoaded {
+                loadApolloKey()
+            }
+        }
+    }
+
+    private func loadApolloKey() {
+        isLoadingApolloKey = true
+        apolloTestResult = nil
+
+        Task {
+            do {
+                if let key = try await CloudKeyStorageService.shared.getAPIKey(for: "apollo"), !key.isEmpty {
+                    await MainActor.run {
+                        apolloApiKey = key
+                        apolloKeyLoaded = true
+                        isLoadingApolloKey = false
+                        viewModel.apolloApiKey = key
+                        if apolloEnabled {
+                            viewModel.apolloEnabled = true
+                        }
+                    }
+                } else {
+                    await MainActor.run {
+                        apolloKeyLoaded = true
+                        isLoadingApolloKey = false
+                    }
+                }
+            } catch {
+                await MainActor.run {
+                    apolloKeyLoaded = true
+                    isLoadingApolloKey = false
+                }
+            }
+        }
+    }
+
+    private func testApolloConnection() {
+        isTestingApollo = true
+        apolloTestResult = nil
+
+        Task {
+            do {
+                // Test with a sample LinkedIn URL
+                let result = try await ApolloEnrichmentService.shared.enrichByLinkedIn(
+                    linkedInURL: "https://www.linkedin.com/in/test",
+                    firstName: "Test",
+                    lastName: "User",
+                    apiKey: apolloApiKey
+                )
+                await MainActor.run {
+                    if result.wasFound {
+                        apolloTestResult = "Success! API key valid. Email: \(result.email ?? "none found")"
+                    } else {
+                        apolloTestResult = "Success! API key valid (test profile not in Apollo DB)"
+                    }
+                    isTestingApollo = false
+                }
+            } catch let error as ApolloError {
+                await MainActor.run {
+                    apolloTestResult = "Error: \(error.localizedDescription)"
+                    isTestingApollo = false
+                }
+            } catch {
+                await MainActor.run {
+                    apolloTestResult = "Error: \(error.localizedDescription)"
+                    isTestingApollo = false
+                }
+            }
         }
     }
 }

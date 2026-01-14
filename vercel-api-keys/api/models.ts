@@ -33,15 +33,19 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       });
       if (response.ok) {
         const data = await response.json();
+        // Include GPT models and o1/o3 reasoning models
         const chatModels = data.data
-          .filter((m: any) => m.id.includes('gpt'))
+          .filter((m: any) => {
+            const id = m.id.toLowerCase();
+            return id.includes('gpt') || id.startsWith('o1') || id.startsWith('o3');
+          })
           .map((m: any) => ({
             id: m.id,
             name: m.id,
             provider: 'openai'
           }))
           .sort((a: Model, b: Model) => b.id.localeCompare(a.id));
-        models.push(...chatModels.slice(0, 10)); // Top 10 GPT models
+        models.push(...chatModels.slice(0, 15)); // Top 15 models
       }
     } catch (e) {
       console.error('OpenAI error:', e);

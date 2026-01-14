@@ -10,6 +10,8 @@ class MainViewModel: ObservableObject {
     @Published var loggingService: LoggingService
     @Published var leadsVM: LeadsViewModel
     @Published var leadFinderVM: LeadFinderViewModel
+    @Published var testVM: TestViewModel
+    @Published var viralPostsVM: ViralPostsViewModel
 
     // App State
     @Published var isLoggedIn: Bool = false
@@ -24,9 +26,24 @@ class MainViewModel: ObservableObject {
         self.loggingService = LoggingService()
         self.leadsVM = LeadsViewModel()
         self.leadFinderVM = LeadFinderViewModel()
+        self.testVM = TestViewModel()
+        self.viralPostsVM = ViralPostsViewModel()
 
         setupBindings()
+        setupCallbacks()
         loggingService.info("Autoleadgen started")
+    }
+
+    private func setupCallbacks() {
+        // Wire up AI comparison results from Lead Finder to Test tab
+        leadFinderVM.onComparisonResult = { [weak self] result in
+            self?.testVM.addResult(result)
+        }
+
+        // Wire up leads from Viral Posts to automation queue
+        viralPostsVM.onLeadsReady = { [weak self] leads in
+            self?.addLeads(leads)
+        }
     }
 
     private func setupBindings() {

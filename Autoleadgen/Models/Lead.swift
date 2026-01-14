@@ -38,6 +38,13 @@ struct Lead: Identifiable, Codable, Equatable {
     var updatedAt: Date
     var lastContactedAt: Date?
 
+    // Profile data from LinkedIn scraping
+    var headline: String?
+    var about: String?
+    var education: String?
+    var connectionDegree: String?
+    var followerCount: String?
+
     // Messaging automation fields
     var messageStatus: MessageStatus
     var messageText: String
@@ -63,6 +70,11 @@ struct Lead: Identifiable, Codable, Equatable {
         createdAt: Date = Date(),
         updatedAt: Date = Date(),
         lastContactedAt: Date? = nil,
+        headline: String? = nil,
+        about: String? = nil,
+        education: String? = nil,
+        connectionDegree: String? = nil,
+        followerCount: String? = nil,
         messageStatus: MessageStatus = .pending,
         messageText: String = "",
         lastAttemptDate: Date? = nil,
@@ -86,6 +98,11 @@ struct Lead: Identifiable, Codable, Equatable {
         self.createdAt = createdAt
         self.updatedAt = updatedAt
         self.lastContactedAt = lastContactedAt
+        self.headline = headline
+        self.about = about
+        self.education = education
+        self.connectionDegree = connectionDegree
+        self.followerCount = followerCount
         self.messageStatus = messageStatus
         self.messageText = messageText
         self.lastAttemptDate = lastAttemptDate
@@ -118,6 +135,12 @@ struct Lead: Identifiable, Codable, Equatable {
             .replacingOccurrences(of: "http://", with: "")
             .replacingOccurrences(of: "www.", with: "")
             .trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+    }
+
+    /// Returns true if any profile data was scraped from LinkedIn
+    var hasProfileData: Bool {
+        headline != nil || about != nil || education != nil ||
+        connectionDegree != nil || followerCount != nil
     }
 
     var isProcessable: Bool {

@@ -1,4 +1,7 @@
 import Foundation
+#if canImport(FoundationModels)
+import FoundationModels
+#endif
 
 enum AIError: Error, LocalizedError {
     case noApiKey
@@ -6,6 +9,11 @@ enum AIError: Error, LocalizedError {
     case apiError(String)
     case unsupportedProvider(String)
     case modelNotConfigured
+    case appleIntelligenceUnavailable
+    case appleIntelligenceNotEnabled
+    case appleIntelligenceDeviceNotEligible
+    case appleIntelligenceModelNotReady
+    case appleIntelligenceError(String)
 
     var errorDescription: String? {
         switch self {
@@ -14,6 +22,11 @@ enum AIError: Error, LocalizedError {
         case .apiError(let message): return "API Error: \(message)"
         case .unsupportedProvider(let provider): return "Unsupported provider: \(provider)"
         case .modelNotConfigured: return "No AI model selected"
+        case .appleIntelligenceUnavailable: return "Apple Intelligence requires macOS 26.0+ with Apple Silicon"
+        case .appleIntelligenceNotEnabled: return "Apple Intelligence is not enabled. Please enable it in System Settings > Apple Intelligence & Siri"
+        case .appleIntelligenceDeviceNotEligible: return "This device is not eligible for Apple Intelligence (requires Apple Silicon Mac)"
+        case .appleIntelligenceModelNotReady: return "Apple Intelligence model is not ready. Please wait for model assets to download in System Settings"
+        case .appleIntelligenceError(let message): return "Apple Intelligence Error: \(message)"
         }
     }
 }
@@ -35,14 +48,19 @@ final class AIMessageService {
         // Determine provider from model ID
         let provider = detectProvider(from: modelId)
 
-        // Fetch API key from cloud
+        // Build prompt with optional sample message
+        let prompt = buildPrompt(profile: profile, firstName: firstName, sampleMessage: sampleMessage)
+
+        // Apple Intelligence doesn't need API key
+        if provider == "apple" {
+            return try await callApple(prompt: prompt)
+        }
+
+        // Fetch API key from cloud for other providers
         guard let apiKey = try await cloudKeyService.getAPIKey(for: provider),
               !apiKey.isEmpty else {
             throw AIError.noApiKey
         }
-
-        // Build prompt with optional sample message
-        let prompt = buildPrompt(profile: profile, firstName: firstName, sampleMessage: sampleMessage)
 
         // Call appropriate API
         switch provider {
@@ -82,11 +100,17 @@ final class AIMessageService {
     // MARK: - Provider Detection
 
     private func detectProvider(from modelId: String) -> String {
-        if modelId.contains("gpt") || modelId.contains("o1") || modelId.contains("o3") {
+        let lowercased = modelId.lowercased()
+        // Apple Intelligence (on-device)
+        if lowercased.contains("apple") || lowercased.contains("foundation") {
+            return "apple"
+        }
+        // OpenAI: GPT models and o1/o3 reasoning models
+        if lowercased.contains("gpt") || lowercased.hasPrefix("o1") || lowercased.hasPrefix("o3") {
             return "openai"
-        } else if modelId.contains("claude") {
+        } else if lowercased.contains("claude") {
             return "anthropic"
-        } else if modelId.contains("grok") {
+        } else if lowercased.contains("grok") {
             return "xai"
         }
         // Default to openai for unknown models
@@ -95,10 +119,41 @@ final class AIMessageService {
 
     // MARK: - OpenAI API
 
-    /// Check if the model is an o1/o3 reasoning model (uses different parameters)
-    private func isReasoningModel(_ modelId: String) -> Bool {
-        let lowercased = modelId.lowercased()
-        return lowercased.contains("o1") || lowercased.contains("o3")
+    /// Model parameter configuration based on official OpenAI documentation
+    /// Source: https://platform.openai.com/docs/api-reference/chat
+    /// Source: https://community.openai.com/t/temperature-in-gpt-5-models/1337133
+    private struct OpenAIModelConfig {
+        let useMaxCompletionTokens: Bool
+        let supportsTemperature: Bool
+
+        /// Get configuration for a specific model
+        static func forModel(_ modelId: String) -> OpenAIModelConfig {
+            let lowercased = modelId.lowercased()
+
+            // GPT-5 reasoning models (gpt-5, gpt-5-mini, gpt-5-nano) - NO temperature support
+            // These are reasoning models that don't support temperature parameter
+            if lowercased.contains("gpt-5") {
+                // gpt-5-chat variants support temperature
+                if lowercased.contains("chat") {
+                    return OpenAIModelConfig(useMaxCompletionTokens: true, supportsTemperature: true)
+                }
+                // All other gpt-5 variants (gpt-5, gpt-5-mini, gpt-5-nano) don't support temperature
+                return OpenAIModelConfig(useMaxCompletionTokens: true, supportsTemperature: false)
+            }
+
+            // GPT-4.1 models (gpt-4.1, gpt-4.1-mini, gpt-4.1-nano) - temperature supported
+            if lowercased.contains("gpt-4.1") {
+                return OpenAIModelConfig(useMaxCompletionTokens: true, supportsTemperature: true)
+            }
+
+            // o1/o3 reasoning models - NO temperature support
+            if lowercased.hasPrefix("o1") || lowercased.hasPrefix("o3") {
+                return OpenAIModelConfig(useMaxCompletionTokens: true, supportsTemperature: false)
+            }
+
+            // Legacy models (gpt-4, gpt-4-turbo, gpt-3.5-turbo) - use max_tokens
+            return OpenAIModelConfig(useMaxCompletionTokens: false, supportsTemperature: true)
+        }
     }
 
     private func callOpenAI(modelId: String, apiKey: String, prompt: String) async throws -> String {
@@ -111,6 +166,9 @@ final class AIMessageService {
         request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
 
+        // Get model-specific configuration
+        let config = OpenAIModelConfig.forModel(modelId)
+
         // Build request body based on model type
         var body: [String: Any] = [
             "model": modelId,
@@ -119,11 +177,18 @@ final class AIMessageService {
             ]
         ]
 
-        // o1/o3 models use max_completion_tokens and don't support temperature
-        if isReasoningModel(modelId) {
-            body["max_completion_tokens"] = 300
+        // Set token parameter based on model
+        // Note: GPT-5 reasoning models need higher limits because they use internal reasoning tokens
+        // GPT-5-mini used 384 reasoning tokens + 48 output tokens for a simple message
+        if config.useMaxCompletionTokens {
+            // Reasoning models need more tokens (reasoning + output)
+            body["max_completion_tokens"] = config.supportsTemperature ? 300 : 1000
         } else {
             body["max_tokens"] = 300
+        }
+
+        // Only add temperature if the model supports it
+        if config.supportsTemperature {
             body["temperature"] = 0.7
         }
 
@@ -157,6 +222,12 @@ final class AIMessageService {
 
     // MARK: - Anthropic API
 
+    /// Anthropic API parameters based on official documentation
+    /// Source: https://docs.anthropic.com/en/api/messages
+    /// - max_tokens: Required, maximum tokens to generate
+    /// - temperature: Optional (0.0-1.0), default 1.0
+    ///   - Use 0.0 for analytical/deterministic tasks
+    ///   - Use 1.0 for creative/generative tasks
     private func callAnthropic(modelId: String, apiKey: String, prompt: String) async throws -> String {
         guard let url = URL(string: "https://api.anthropic.com/v1/messages") else {
             throw AIError.invalidResponse
@@ -168,12 +239,16 @@ final class AIMessageService {
         request.setValue("2023-06-01", forHTTPHeaderField: "anthropic-version")
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
 
+        // Anthropic API parameters:
+        // - max_tokens: Required
+        // - temperature: Optional, range 0.0-1.0 (NOT 0-2 like OpenAI)
         let body: [String: Any] = [
             "model": modelId,
             "messages": [
                 ["role": "user", "content": prompt]
             ],
-            "max_tokens": 300
+            "max_tokens": 300,
+            "temperature": 0.7  // Within Anthropic's 0.0-1.0 range
         ]
         request.httpBody = try JSONSerialization.data(withJSONObject: body)
 
@@ -204,6 +279,13 @@ final class AIMessageService {
 
     // MARK: - xAI API
 
+    /// xAI Grok API parameters based on official documentation
+    /// Source: https://docs.x.ai/docs/overview
+    /// Source: https://docs.x.ai/docs/guides/reasoning
+    /// - max_tokens: Supported for all models
+    /// - temperature: Supported (0-2 range, similar to OpenAI)
+    /// - reasoning_effort: Only supported by grok-3-mini (not grok-3, grok-4, or grok-4-fast-reasoning)
+    /// - Non-reasoning models also support: presence_penalty, frequency_penalty, stop
     private func callXAI(modelId: String, apiKey: String, prompt: String) async throws -> String {
         guard let url = URL(string: "https://api.x.ai/v1/chat/completions") else {
             throw AIError.invalidResponse
@@ -214,6 +296,8 @@ final class AIMessageService {
         request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
 
+        // xAI uses OpenAI-compatible API format
+        // All Grok models support temperature and max_tokens
         let body: [String: Any] = [
             "model": modelId,
             "messages": [
@@ -248,6 +332,78 @@ final class AIMessageService {
         }
 
         return content.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    // MARK: - Apple Foundation Models
+
+    /// Check if Apple Intelligence API is available on this device (macOS 26+)
+    static var isAppleIntelligenceAvailable: Bool {
+        #if canImport(FoundationModels)
+        if #available(macOS 26.0, *) {
+            return true
+        }
+        #endif
+        return false
+    }
+
+    /// Check if Apple Intelligence is ready to use (model assets downloaded and enabled)
+    static var appleIntelligenceStatus: (available: Bool, reason: String?) {
+        #if canImport(FoundationModels)
+        if #available(macOS 26.0, *) {
+            let model = SystemLanguageModel.default
+            switch model.availability {
+            case .available:
+                return (true, nil)
+            case .unavailable(let reason):
+                switch reason {
+                case .appleIntelligenceNotEnabled:
+                    return (false, "Apple Intelligence is not enabled. Enable it in System Settings > Apple Intelligence & Siri")
+                case .deviceNotEligible:
+                    return (false, "This device is not eligible for Apple Intelligence")
+                case .modelNotReady:
+                    return (false, "Model assets are not ready. Please wait for download to complete in System Settings")
+                @unknown default:
+                    return (false, "Apple Intelligence is unavailable")
+                }
+            }
+        }
+        #endif
+        return (false, "Requires macOS 26.0+ with Apple Silicon")
+    }
+
+    private func callApple(prompt: String) async throws -> String {
+        #if canImport(FoundationModels)
+        if #available(macOS 26.0, *) {
+            // Check model availability before attempting to use it
+            let model = SystemLanguageModel.default
+            switch model.availability {
+            case .available:
+                break // Model is ready, continue
+            case .unavailable(let reason):
+                switch reason {
+                case .appleIntelligenceNotEnabled:
+                    throw AIError.appleIntelligenceNotEnabled
+                case .deviceNotEligible:
+                    throw AIError.appleIntelligenceDeviceNotEligible
+                case .modelNotReady:
+                    throw AIError.appleIntelligenceModelNotReady
+                @unknown default:
+                    throw AIError.appleIntelligenceError("Unknown unavailability reason")
+                }
+            }
+
+            do {
+                let session = LanguageModelSession()
+                // Prewarm the model to reduce latency
+                try await session.prewarm()
+                let response = try await session.respond(to: prompt)
+                return response.content.trimmingCharacters(in: .whitespacesAndNewlines)
+            } catch let error as LanguageModelSession.GenerationError {
+                throw AIError.appleIntelligenceError(error.localizedDescription)
+            }
+        }
+        #endif
+        throw AIError.appleIntelligenceUnavailable
     }
 
     // MARK: - Prompt Builder

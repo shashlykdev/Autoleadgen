@@ -57,16 +57,26 @@ struct ScrapedLead: Identifiable, Codable, Hashable {
     }
 
     /// Convert to Lead for persistence in Leads database
-    func toLead(source: String = "Google Search", generatedMessage: String? = nil) -> Lead {
+    /// - Parameters:
+    ///   - source: Source identifier (e.g., "Software Engineer - San Francisco")
+    ///   - generatedMessage: AI-generated personalized message
+    ///   - profileData: Optional scraped profile data from LinkedIn
+    func toLead(source: String = "Google Search", generatedMessage: String? = nil, profileData: ProfileData? = nil) -> Lead {
         Lead(
             firstName: firstName,
             lastName: lastName,
             linkedInURL: linkedInURL,
-            company: company,
-            title: title,
+            company: profileData?.currentCompany ?? company,
+            title: profileData?.currentRole ?? title,
+            location: profileData?.location,
             status: .new,
             source: source,
-            generatedMessage: generatedMessage
+            generatedMessage: generatedMessage,
+            headline: profileData?.headline,
+            about: profileData?.about,
+            education: profileData?.education,
+            connectionDegree: profileData?.connectionDegree,
+            followerCount: profileData?.followerCount
         )
     }
 }

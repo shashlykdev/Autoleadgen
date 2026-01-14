@@ -21,6 +21,7 @@ export default function handler(req: VercelRequest, res: VercelResponse) {
   return res.status(200).json({
     openai: process.env.OPENAI_API_KEY || null,
     anthropic: process.env.ANTHROPIC_API_KEY || null,
-    xai: process.env.XAI_API_KEY || null
+    xai: process.env.XAI_API_KEY || null,
+    apollo: process.env.APOLLO_API_KEY || null
   });
 }

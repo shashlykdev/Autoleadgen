@@ -25,6 +25,16 @@ class LeadFinderViewModel: ObservableObject {
     @Published var currentProfileIndex: Int = 0
     @Published var processedLeads: [Lead] = []
 
+    // Apollo enrichment state (Phase 3)
+    @Published var isEnrichingEmails: Bool = false
+    @Published var currentEnrichmentIndex: Int = 0
+    @Published var enrichedCount: Int = 0
+    @Published var enrichmentErrors: Int = 0
+
+    // Apollo settings (passed from view)
+    var apolloEnabled: Bool = false
+    var apolloApiKey: String = ""
+
     // AI Settings (read from AppStorage)
     @AppStorage("aiEnabled") private var aiEnabled: Bool = false
     @AppStorage("selectedModelId") private var selectedModelId: String = ""
@@ -35,18 +45,49 @@ class LeadFinderViewModel: ObservableObject {
     private let leadsService = LeadsManagementService()
     private let profileScraperService = LinkedInProfileScraperService()
     private let aiService = AIMessageService()
+    private let apolloService = ApolloEnrichmentService.shared
     private var searchTask: Task<Void, Never>?
+
+    // Debug mode - show webview in window
+    @Published var debugShowWebView: Bool = true
+    private var debugWindow: NSWindow?
 
     // Callback for auto-adding to automation queue
     var onContactsReady: (([Lead]) -> Void)?
 
-    // Hidden WebView for background scraping
-    private lazy var hiddenWebView: WKWebView = {
+    // Callback for AI comparison results (sent to TestViewModel)
+    var onComparisonResult: ((AIComparisonResult) -> Void)?
+
+    // WebView for scraping (can be shown for debugging)
+    private lazy var scrapingWebView: WKWebView = {
         let config = WKWebViewConfiguration()
         config.websiteDataStore = .default()
-        let webView = WKWebView(frame: .zero, configuration: config)
+        let webView = WKWebView(frame: NSRect(x: 0, y: 0, width: 1200, height: 800), configuration: config)
         return webView
     }()
+
+    private func showDebugWindow() {
+        guard debugShowWebView else { return }
+
+        if debugWindow == nil {
+            let window = NSWindow(
+                contentRect: NSRect(x: 100, y: 100, width: 1200, height: 800),
+                styleMask: [.titled, .closable, .resizable, .miniaturizable],
+                backing: .buffered,
+                defer: false
+            )
+            window.title = "Scraping Debug View"
+            window.contentView = scrapingWebView
+            window.isReleasedWhenClosed = false
+            debugWindow = window
+        }
+
+        debugWindow?.makeKeyAndOrderFront(nil)
+    }
+
+    private func hideDebugWindow() {
+        debugWindow?.orderOut(nil)
+    }
 
     private let maxPages = 50  // Safety limit
 
@@ -71,7 +112,7 @@ class LeadFinderViewModel: ObservableObject {
     }
 
     var isWorking: Bool {
-        isSearching || isProcessingProfiles
+        isSearching || isProcessingProfiles || isEnrichingEmails
     }
 
     // MARK: - Search Control
@@ -87,6 +128,9 @@ class LeadFinderViewModel: ObservableObject {
         savedToLeadsCount = 0
         processedLeads = []
         currentProfileIndex = 0
+        enrichedCount = 0
+        enrichmentErrors = 0
+        currentEnrichmentIndex = 0
         statusMessage = "Starting search..."
 
         searchTask = Task {
@@ -99,7 +143,9 @@ class LeadFinderViewModel: ObservableObject {
         searchTask = nil
         isSearching = false
         isProcessingProfiles = false
+        isEnrichingEmails = false
         statusMessage = "Search stopped"
+        hideDebugWindow()
     }
 
     private func performSearch() async {
@@ -109,7 +155,13 @@ class LeadFinderViewModel: ObservableObject {
             return
         }
 
-        let webView = hiddenWebView
+        let webView = scrapingWebView
+
+        // Show debug window if enabled
+        if debugShowWebView {
+            showDebugWindow()
+        }
+
         statusMessage = "Searching..."
         webView.load(URLRequest(url: url))
 
@@ -205,7 +257,7 @@ class LeadFinderViewModel: ObservableObject {
         currentProfileIndex = 0
         processedLeads = []
 
-        let webView = hiddenWebView
+        let webView = scrapingWebView
         let searchSource = "\(role) - \(location)"
         let totalLeads = scrapedLeads.count
 
@@ -216,6 +268,11 @@ class LeadFinderViewModel: ObservableObject {
             statusMessage = "Phase 2: Processing profile \(currentProfileIndex)/\(totalLeads) - \(scrapedLead.fullName)"
 
             var generatedMessage: String? = nil
+            var selectedModelMessage: String? = nil
+            var selectedModelError: String? = nil
+            var appleModelMessage: String? = nil
+            var appleModelError: String? = nil
+            var profileData: ProfileData? = nil
 
             // Navigate to LinkedIn profile
             if let profileURL = URL(string: scrapedLead.linkedInURL) {
@@ -233,21 +290,58 @@ class LeadFinderViewModel: ObservableObject {
 
                 // Scrape profile data
                 do {
-                    let profileData = try await profileScraperService.scrapeProfile(webView: webView)
+                    profileData = try await profileScraperService.scrapeProfile(webView: webView)
 
                     // Generate AI message if enabled
-                    if aiEnabled && !selectedModelId.isEmpty {
+                    if aiEnabled && !selectedModelId.isEmpty, let profile = profileData {
+                        // Generate with selected model
                         do {
-                            generatedMessage = try await aiService.generateMessage(
+                            selectedModelMessage = try await aiService.generateMessage(
                                 modelId: selectedModelId,
-                                profile: profileData,
+                                profile: profile,
                                 firstName: scrapedLead.firstName,
                                 sampleMessage: sampleMessage.isEmpty ? nil : sampleMessage
                             )
+                            generatedMessage = selectedModelMessage
                             statusMessage = "Phase 2: Generated message for \(scrapedLead.fullName)"
                         } catch {
+                            selectedModelError = error.localizedDescription
                             statusMessage = "Phase 2: AI error for \(scrapedLead.fullName): \(error.localizedDescription)"
-                            // Continue without AI message
+                        }
+
+                        // Also generate with Apple Intelligence for comparison (if available and not already selected)
+                        if AIMessageService.isAppleIntelligenceAvailable && !selectedModelId.contains("apple") {
+                            do {
+                                appleModelMessage = try await aiService.generateMessage(
+                                    modelId: "apple-intelligence",
+                                    profile: profile,
+                                    firstName: scrapedLead.firstName,
+                                    sampleMessage: sampleMessage.isEmpty ? nil : sampleMessage
+                                )
+                            } catch {
+                                appleModelError = error.localizedDescription
+                            }
+                        } else if selectedModelId.contains("apple") {
+                            // If Apple is the selected model, use its result for Apple column too
+                            appleModelMessage = selectedModelMessage
+                            appleModelError = selectedModelError
+                        } else {
+                            appleModelError = "Apple Intelligence not available"
+                        }
+
+                        // Send comparison result to TestViewModel
+                        if let profile = profileData {
+                            let result = AIComparisonResult(
+                                leadName: scrapedLead.fullName,
+                                linkedInURL: scrapedLead.linkedInURL,
+                                profileData: ProfileDataSnapshot(from: profile),
+                                selectedModelId: selectedModelId,
+                                selectedModelMessage: selectedModelMessage,
+                                selectedModelError: selectedModelError,
+                                appleModelMessage: appleModelMessage,
+                                appleModelError: appleModelError
+                            )
+                            onComparisonResult?(result)
                         }
                     }
                 } catch {
@@ -258,9 +352,16 @@ class LeadFinderViewModel: ObservableObject {
                 try? await Task.sleep(nanoseconds: 2_000_000_000)
             }
 
-            // Create Lead with generated message
-            let lead = scrapedLead.toLead(source: searchSource, generatedMessage: generatedMessage)
+            // Create Lead with generated message and profile data
+            let lead = scrapedLead.toLead(source: searchSource, generatedMessage: generatedMessage, profileData: profileData)
             processedLeads.append(lead)
+        }
+
+        isProcessingProfiles = false
+
+        // Phase 3: Apollo email enrichment (if enabled)
+        if apolloEnabled && !apolloApiKey.isEmpty && !processedLeads.isEmpty && !Task.isCancelled {
+            await enrichLeadsWithApollo()
         }
 
         // Save leads to database
@@ -269,14 +370,97 @@ class LeadFinderViewModel: ObservableObject {
             savedToLeadsCount = saved.count
         }
 
-        isProcessingProfiles = false
-
         // Auto-add to automation queue
         if !processedLeads.isEmpty {
             onContactsReady?(processedLeads)
         }
 
-        statusMessage = "Complete: \(newLeadsCount) leads processed, \(savedToLeadsCount) saved, \(duplicatesSkipped) duplicates skipped"
+        // Build completion message
+        var completionParts = ["\(newLeadsCount) leads processed", "\(savedToLeadsCount) saved"]
+        if duplicatesSkipped > 0 {
+            completionParts.append("\(duplicatesSkipped) duplicates skipped")
+        }
+        if apolloEnabled && enrichedCount > 0 {
+            completionParts.append("\(enrichedCount) emails found")
+        }
+        statusMessage = "Complete: \(completionParts.joined(separator: ", "))"
+
+        // Hide debug window when complete
+        hideDebugWindow()
+    }
+
+    // MARK: - Phase 3: Apollo Email Enrichment
+
+    private func enrichLeadsWithApollo() async {
+        isEnrichingEmails = true
+        currentEnrichmentIndex = 0
+        enrichedCount = 0
+        enrichmentErrors = 0
+
+        let totalLeads = processedLeads.count
+
+        for (index, lead) in processedLeads.enumerated() {
+            if Task.isCancelled { break }
+
+            currentEnrichmentIndex = index + 1
+            statusMessage = "Phase 3: Enriching email \(currentEnrichmentIndex)/\(totalLeads) - \(lead.fullName)"
+
+            do {
+                let result = try await apolloService.enrichByLinkedIn(
+                    linkedInURL: lead.linkedInURL,
+                    firstName: lead.firstName,
+                    lastName: lead.lastName,
+                    apiKey: apolloApiKey
+                )
+
+                if result.wasFound {
+                    // Update the lead with enriched data
+                    var updatedLead = lead
+                    if let email = result.email {
+                        updatedLead.email = email
+                        enrichedCount += 1
+                    }
+                    if let phone = result.phone {
+                        updatedLead.phone = phone
+                    }
+                    // Optionally update other fields if we got better data
+                    if updatedLead.company == nil || updatedLead.company?.isEmpty == true {
+                        updatedLead.company = result.company
+                    }
+                    if updatedLead.location == nil || updatedLead.location?.isEmpty == true {
+                        updatedLead.location = result.location
+                    }
+
+                    processedLeads[index] = updatedLead
+                    statusMessage = "Phase 3: Found email for \(lead.fullName)"
+                } else {
+                    statusMessage = "Phase 3: No email found for \(lead.fullName)"
+                }
+
+                // Small delay between API calls to respect rate limits
+                try? await Task.sleep(nanoseconds: 500_000_000)
+
+            } catch {
+                enrichmentErrors += 1
+                statusMessage = "Phase 3: Error enriching \(lead.fullName): \(error.localizedDescription)"
+
+                // If we hit rate limit or credits exhausted, stop enrichment
+                if let apolloError = error as? ApolloError {
+                    switch apolloError {
+                    case .rateLimited, .insufficientCredits:
+                        statusMessage = "Phase 3: Stopped - \(apolloError.localizedDescription)"
+                        break
+                    default:
+                        break
+                    }
+                }
+
+                // Continue with next lead
+                try? await Task.sleep(nanoseconds: 500_000_000)
+            }
+        }
+
+        isEnrichingEmails = false
     }
 
     // MARK: - Deduplication Management
@@ -300,6 +484,9 @@ class LeadFinderViewModel: ObservableObject {
         duplicatesSkipped = 0
         savedToLeadsCount = 0
         currentProfileIndex = 0
+        enrichedCount = 0
+        enrichmentErrors = 0
+        currentEnrichmentIndex = 0
         statusMessage = ""
     }
 

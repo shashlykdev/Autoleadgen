@@ -274,65 +274,121 @@ struct LeadRowView: View {
     let onEdit: () -> Void
     let onDelete: () -> Void
 
+    @State private var showProfileInfo: Bool = false
+
     var body: some View {
-        HStack {
-            Button(action: onToggleSelect) {
-                Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
-                    .foregroundColor(isSelected ? .accentColor : .secondary)
-            }
-            .buttonStyle(.borderless)
+        VStack(alignment: .leading, spacing: 4) {
+            HStack {
+                Button(action: onToggleSelect) {
+                    Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
+                        .foregroundColor(isSelected ? .accentColor : .secondary)
+                }
+                .buttonStyle(.borderless)
 
-            VStack(alignment: .leading, spacing: 2) {
-                Text(lead.fullName)
-                    .font(.headline)
+                VStack(alignment: .leading, spacing: 2) {
+                    HStack(spacing: 6) {
+                        Text(lead.fullName)
+                            .font(.headline)
 
-                HStack(spacing: 8) {
-                    if let title = lead.title {
-                        Text(title)
-                            .font(.caption)
-                            .foregroundColor(.secondary)
+                        // Email badge
+                        if let email = lead.email, !email.isEmpty {
+                            HStack(spacing: 2) {
+                                Image(systemName: "envelope.fill")
+                                    .font(.caption2)
+                                Text(email)
+                                    .font(.caption)
+                            }
+                            .foregroundColor(.green)
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 2)
+                            .background(Color.green.opacity(0.1))
+                            .cornerRadius(4)
+                        }
+
+                        // Phone badge
+                        if let phone = lead.phone, !phone.isEmpty {
+                            HStack(spacing: 2) {
+                                Image(systemName: "phone.fill")
+                                    .font(.caption2)
+                                Text(phone)
+                                    .font(.caption)
+                            }
+                            .foregroundColor(.blue)
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 2)
+                            .background(Color.blue.opacity(0.1))
+                            .cornerRadius(4)
+                        }
                     }
-                    if let company = lead.company {
-                        Text("@ \(company)")
-                            .font(.caption)
-                            .foregroundColor(.secondary)
+
+                    HStack(spacing: 8) {
+                        if let title = lead.title {
+                            Text(title)
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                        }
+                        if let company = lead.company {
+                            Text("@ \(company)")
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                        }
+                        if let location = lead.location {
+                            Text("• \(location)")
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                        }
                     }
                 }
-            }
 
-            Spacer()
+                Spacer()
 
-            // Tags
-            HStack(spacing: 4) {
-                ForEach(lead.tags.prefix(3), id: \.self) { tag in
-                    Text(tag)
-                        .font(.caption2)
-                        .padding(.horizontal, 6)
-                        .padding(.vertical, 2)
-                        .background(Color.blue.opacity(0.2))
-                        .cornerRadius(4)
+                // Profile info indicator
+                if lead.hasProfileData {
+                    Button(action: { showProfileInfo.toggle() }) {
+                        Image(systemName: showProfileInfo ? "person.fill" : "person")
+                            .foregroundColor(.blue)
+                    }
+                    .buttonStyle(.borderless)
+                    .help("Show profile data from LinkedIn")
                 }
+
+                // Tags
+                HStack(spacing: 4) {
+                    ForEach(lead.tags.prefix(3), id: \.self) { tag in
+                        Text(tag)
+                            .font(.caption2)
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 2)
+                            .background(Color.blue.opacity(0.2))
+                            .cornerRadius(4)
+                    }
+                }
+
+                // Status badge
+                Text(lead.status.rawValue)
+                    .font(.caption)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 4)
+                    .background(statusColor(lead.status).opacity(0.2))
+                    .foregroundColor(statusColor(lead.status))
+                    .cornerRadius(4)
+
+                Button(action: onEdit) {
+                    Image(systemName: "pencil")
+                }
+                .buttonStyle(.borderless)
+
+                Button(action: onDelete) {
+                    Image(systemName: "trash")
+                        .foregroundColor(.red)
+                }
+                .buttonStyle(.borderless)
             }
 
-            // Status badge
-            Text(lead.status.rawValue)
-                .font(.caption)
-                .padding(.horizontal, 8)
-                .padding(.vertical, 4)
-                .background(statusColor(lead.status).opacity(0.2))
-                .foregroundColor(statusColor(lead.status))
-                .cornerRadius(4)
-
-            Button(action: onEdit) {
-                Image(systemName: "pencil")
+            // Expandable profile info section
+            if showProfileInfo && lead.hasProfileData {
+                LeadProfileInfoSection(lead: lead)
             }
-            .buttonStyle(.borderless)
-
-            Button(action: onDelete) {
-                Image(systemName: "trash")
-                    .foregroundColor(.red)
-            }
-            .buttonStyle(.borderless)
         }
         .padding(.vertical, 4)
     }
@@ -344,6 +400,80 @@ struct LeadRowView: View {
         case .responded: return .purple
         case .converted: return .green
         case .notInterested: return .gray
+        }
+    }
+}
+
+// MARK: - Lead Profile Info Section
+
+struct LeadProfileInfoSection: View {
+    let lead: Lead
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Profile Data from LinkedIn")
+                .font(.caption)
+                .fontWeight(.medium)
+                .foregroundColor(.secondary)
+
+            LazyVGrid(columns: [
+                GridItem(.flexible(), alignment: .topLeading),
+                GridItem(.flexible(), alignment: .topLeading)
+            ], spacing: 8) {
+                LeadProfileField(label: "Email", value: lead.email)
+                LeadProfileField(label: "Phone", value: lead.phone)
+                LeadProfileField(label: "Headline", value: lead.headline)
+                LeadProfileField(label: "Location", value: lead.location)
+                LeadProfileField(label: "Education", value: lead.education)
+                LeadProfileField(label: "Connection", value: lead.connectionDegree)
+                LeadProfileField(label: "Followers", value: lead.followerCount)
+            }
+
+            if let about = lead.about, !about.isEmpty {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("About")
+                        .font(.caption2)
+                        .foregroundColor(.secondary)
+                    Text(about)
+                        .font(.caption)
+                        .lineLimit(3)
+                }
+            }
+
+            if let message = lead.generatedMessage, !message.isEmpty {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("AI Generated Message")
+                        .font(.caption2)
+                        .foregroundColor(.secondary)
+                    Text(message)
+                        .font(.caption)
+                        .padding(8)
+                        .background(Color.blue.opacity(0.1))
+                        .cornerRadius(6)
+                }
+            }
+        }
+        .padding(10)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color.blue.opacity(0.05))
+        .cornerRadius(6)
+    }
+}
+
+struct LeadProfileField: View {
+    let label: String
+    let value: String?
+
+    var body: some View {
+        if let value = value, !value.isEmpty {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(label)
+                    .font(.caption2)
+                    .foregroundColor(.secondary)
+                Text(value)
+                    .font(.caption)
+                    .lineLimit(2)
+            }
         }
     }
 }
@@ -366,6 +496,14 @@ struct LeadEditSheet: View {
     @State private var notes: String = ""
     @State private var status: LeadStatus = .new
     @State private var tagsText: String = ""
+
+    // Profile data fields (read-only, preserved from scraping)
+    @State private var headline: String = ""
+    @State private var about: String = ""
+    @State private var education: String = ""
+    @State private var connectionDegree: String = ""
+    @State private var followerCount: String = ""
+    @State private var generatedMessage: String = ""
 
     var body: some View {
         VStack(spacing: 16) {
@@ -403,6 +541,39 @@ struct LeadEditSheet: View {
                     TextEditor(text: $notes)
                         .frame(height: 80)
                 }
+
+                // Show profile data if available (read-only)
+                if lead?.hasProfileData == true {
+                    Section("LinkedIn Profile Data (Read-only)") {
+                        if !headline.isEmpty {
+                            LabeledContent("Headline", value: headline)
+                        }
+                        if !education.isEmpty {
+                            LabeledContent("Education", value: education)
+                        }
+                        if !connectionDegree.isEmpty {
+                            LabeledContent("Connection", value: connectionDegree)
+                        }
+                        if !followerCount.isEmpty {
+                            LabeledContent("Followers", value: followerCount)
+                        }
+                        if !about.isEmpty {
+                            VStack(alignment: .leading) {
+                                Text("About")
+                                    .foregroundColor(.secondary)
+                                Text(about)
+                                    .font(.caption)
+                            }
+                        }
+                    }
+                }
+
+                if !generatedMessage.isEmpty {
+                    Section("AI Generated Message") {
+                        Text(generatedMessage)
+                            .font(.caption)
+                    }
+                }
             }
             .formStyle(.grouped)
 
@@ -431,9 +602,15 @@ struct LeadEditSheet: View {
                         tags: tags,
                         status: status,
                         source: lead?.source,
+                        generatedMessage: generatedMessage.isEmpty ? nil : generatedMessage,
                         createdAt: lead?.createdAt ?? Date(),
                         updatedAt: Date(),
-                        lastContactedAt: lead?.lastContactedAt
+                        lastContactedAt: lead?.lastContactedAt,
+                        headline: headline.isEmpty ? nil : headline,
+                        about: about.isEmpty ? nil : about,
+                        education: education.isEmpty ? nil : education,
+                        connectionDegree: connectionDegree.isEmpty ? nil : connectionDegree,
+                        followerCount: followerCount.isEmpty ? nil : followerCount
                     )
                     onSave(newLead)
                     dismiss()
@@ -444,7 +621,7 @@ struct LeadEditSheet: View {
             .padding()
         }
         .padding()
-        .frame(width: 500, height: 600)
+        .frame(width: 500, height: 700)
         .onAppear {
             if let lead = lead {
                 firstName = lead.firstName
@@ -458,6 +635,13 @@ struct LeadEditSheet: View {
                 notes = lead.notes ?? ""
                 status = lead.status
                 tagsText = lead.tags.joined(separator: ", ")
+                // Profile data
+                headline = lead.headline ?? ""
+                about = lead.about ?? ""
+                education = lead.education ?? ""
+                connectionDegree = lead.connectionDegree ?? ""
+                followerCount = lead.followerCount ?? ""
+                generatedMessage = lead.generatedMessage ?? ""
             }
         }
     }

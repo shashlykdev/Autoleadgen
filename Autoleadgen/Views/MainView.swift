@@ -22,7 +22,9 @@ struct MainView: View {
                     Text("Automation").tag(0)
                     Text("Lead Finder").tag(1)
                     Text("Leads").tag(2)
-                    Text("Settings").tag(3)
+                    Text("Viral Posts").tag(3)
+                    Text("Test").tag(4)
+                    Text("Settings").tag(5)
                 }
                 .pickerStyle(.segmented)
                 .padding()
@@ -51,9 +53,22 @@ struct MainView: View {
                     )
                     .tag(2)
 
-                    // Tab 3: Settings
+                    // Tab 3: Viral Posts
+                    ViralPostsView(
+                        viewModel: viewModel.viralPostsVM,
+                        onAddToContacts: { leads in
+                            viewModel.addLeads(leads)
+                        }
+                    )
+                    .tag(3)
+
+                    // Tab 4: Test (AI Comparison)
+                    TestView(viewModel: viewModel.testVM)
+                        .tag(4)
+
+                    // Tab 5: Settings
                     settingsTab
-                        .tag(3)
+                        .tag(5)
                 }
                 .tabViewStyle(.automatic)
             }
