@@ -406,8 +406,10 @@ struct LeadFinderView: View {
 
     /// Sync Apollo settings from View to ViewModel
     private func syncApolloSettingsToViewModel() {
-        viewModel.apolloEnabled = apolloEnabled && !apolloApiKey.isEmpty
+        let enabled = apolloEnabled && !apolloApiKey.isEmpty
+        viewModel.apolloEnabled = enabled
         viewModel.apolloApiKey = apolloApiKey
+        print("🔷 [Apollo Sync] enabled=\(enabled), apolloEnabled=\(apolloEnabled), apiKeyLoaded=\(!apolloApiKey.isEmpty), apiKeyLength=\(apolloApiKey.count)")
     }
 
     private func loadApolloCredits(apiKey: String) async {

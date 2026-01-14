@@ -360,8 +360,12 @@ class LeadFinderViewModel: ObservableObject {
         isProcessingProfiles = false
 
         // Phase 3: Apollo email enrichment (if enabled)
+        print("🔷 [Apollo Check] apolloEnabled=\(apolloEnabled), apiKeyEmpty=\(apolloApiKey.isEmpty), leadsCount=\(processedLeads.count), cancelled=\(Task.isCancelled)")
         if apolloEnabled && !apolloApiKey.isEmpty && !processedLeads.isEmpty && !Task.isCancelled {
+            print("🔷 [Apollo] Starting enrichment for \(processedLeads.count) leads")
             await enrichLeadsWithApollo()
+        } else {
+            print("🔷 [Apollo] Skipping enrichment - conditions not met")
         }
 
         // Save leads to database
@@ -398,6 +402,7 @@ class LeadFinderViewModel: ObservableObject {
         enrichmentErrors = 0
 
         let totalLeads = processedLeads.count
+        print("🔷 [Apollo Enrichment] Starting for \(totalLeads) leads with API key length: \(apolloApiKey.count)")
 
         for (index, lead) in processedLeads.enumerated() {
             if Task.isCancelled { break }
