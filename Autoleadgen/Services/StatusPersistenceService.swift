@@ -3,7 +3,7 @@ import Foundation
 actor StatusPersistenceService {
     private let statusFileName = "autoleadgen_status.json"
 
-    struct ContactStatusData: Codable {
+    struct LeadStatusData: Codable {
         var statuses: [String: StatusEntry]
 
         init(statuses: [String: StatusEntry] = [:]) {
@@ -23,25 +23,25 @@ actor StatusPersistenceService {
         }
     }
 
-    func saveStatus(contacts: [Contact], excelPath: URL) async throws {
+    func saveStatus(leads: [Lead], excelPath: URL) async throws {
         let statusPath = getStatusFilePath(for: excelPath)
 
-        var statusData = ContactStatusData()
+        var statusData = LeadStatusData()
 
         // Load existing if present
         if FileManager.default.fileExists(atPath: statusPath.path) {
             let data = try Data(contentsOf: statusPath)
             let decoder = JSONDecoder()
             decoder.dateDecodingStrategy = .iso8601
-            statusData = try decoder.decode(ContactStatusData.self, from: data)
+            statusData = try decoder.decode(LeadStatusData.self, from: data)
         }
 
-        // Update with current contacts
-        for contact in contacts {
-            statusData.statuses[contact.linkedInURL] = StatusEntry(
-                status: contact.status.rawValue,
+        // Update with current leads
+        for lead in leads {
+            statusData.statuses[lead.linkedInURL] = StatusEntry(
+                status: lead.messageStatus.rawValue,
                 lastUpdated: Date(),
-                errorMessage: contact.errorMessage
+                errorMessage: lead.errorMessage
             )
         }
 
@@ -63,12 +63,12 @@ actor StatusPersistenceService {
         let data = try Data(contentsOf: statusPath)
         let decoder = JSONDecoder()
         decoder.dateDecodingStrategy = .iso8601
-        let statusData = try decoder.decode(ContactStatusData.self, from: data)
+        let statusData = try decoder.decode(LeadStatusData.self, from: data)
         return statusData.statuses
     }
 
-    func updateContactStatus(_ contact: Contact, excelPath: URL) async throws {
-        try await saveStatus(contacts: [contact], excelPath: excelPath)
+    func updateLeadStatus(_ lead: Lead, excelPath: URL) async throws {
+        try await saveStatus(leads: [lead], excelPath: excelPath)
     }
 
     private func getStatusFilePath(for excelPath: URL) -> URL {

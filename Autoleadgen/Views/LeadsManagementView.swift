@@ -6,8 +6,9 @@ struct LeadsManagementView: View {
     @State private var showingAddLead = false
     @State private var showingImporter = false
     @State private var showingExporter = false
+    @State private var showingClearConfirmation = false
     @State private var editingLead: Lead?
-    let onAddToContacts: ([Contact]) -> Void
+    let onAddToContacts: ([Lead]) -> Void
 
     var body: some View {
         VStack(spacing: 0) {
@@ -56,6 +57,14 @@ struct LeadsManagementView: View {
         .task {
             await viewModel.loadLeads()
         }
+        .alert("Clear All Leads", isPresented: $showingClearConfirmation) {
+            Button("Cancel", role: .cancel) { }
+            Button("Clear All", role: .destructive) {
+                Task { await viewModel.clearAllLeads() }
+            }
+        } message: {
+            Text("Are you sure you want to delete all \(viewModel.leads.count) leads? This action cannot be undone.")
+        }
     }
 
     // MARK: - Header
@@ -79,13 +88,16 @@ struct LeadsManagementView: View {
             Menu {
                 Button("Import CSV") { showingImporter = true }
                 Button("Export CSV") {
-                    Task {
-                        let csv = await viewModel.exportToCSV()
-                        // Save to clipboard or file
-                        NSPasteboard.general.clearContents()
-                        NSPasteboard.general.setString(csv, forType: .string)
-                    }
+                    let csv = viewModel.exportToCSV()
+                    // Save to clipboard or file
+                    NSPasteboard.general.clearContents()
+                    NSPasteboard.general.setString(csv, forType: .string)
                 }
+                Divider()
+                Button("Clear All Leads", role: .destructive) {
+                    showingClearConfirmation = true
+                }
+                .disabled(viewModel.leads.isEmpty)
             } label: {
                 Label("More", systemImage: "ellipsis.circle")
             }
@@ -213,11 +225,11 @@ struct LeadsManagementView: View {
 
                 Spacer()
 
-                Button("Add to Contacts") {
-                    let contacts = viewModel.convertToContacts(
-                        messageTemplate: "Hi {firstName}, I'd love to connect!"
-                    )
-                    onAddToContacts(contacts)
+                Button("Add to Automation") {
+                    let selectedLeadsList = viewModel.leads.filter {
+                        viewModel.selectedLeads.contains($0.id)
+                    }
+                    onAddToContacts(selectedLeadsList)
                 }
                 .buttonStyle(.borderedProminent)
             } else {

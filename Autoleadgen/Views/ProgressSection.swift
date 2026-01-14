@@ -12,7 +12,7 @@ struct ProgressSection: View {
                 .progressViewStyle(.linear)
 
             HStack {
-                Text("\(automationVM.currentContactIndex) / \(automationVM.totalContacts)")
+                Text("\(automationVM.currentLeadIndex) / \(automationVM.totalLeads)")
                     .font(.caption)
                     .foregroundColor(.secondary)
 

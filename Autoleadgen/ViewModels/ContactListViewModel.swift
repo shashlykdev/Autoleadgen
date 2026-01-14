@@ -1,9 +1,10 @@
 import SwiftUI
 import Combine
 
+/// Manages the automation queue of leads for LinkedIn messaging
 @MainActor
 class ContactListViewModel: ObservableObject {
-    @Published var contacts: [Contact] = []
+    @Published var leads: [Lead] = []
     @Published var isLoading: Bool = false
     @Published var errorMessage: String?
     @Published var currentExcelPath: URL?
@@ -11,50 +12,52 @@ class ContactListViewModel: ObservableObject {
     private let excelService = ExcelService()
     private let statusService = StatusPersistenceService()
 
-    var pendingContacts: [Contact] {
-        contacts.filter { $0.status == .pending }
+    var pendingLeads: [Lead] {
+        leads.filter { $0.messageStatus == .pending }
     }
 
-    var processableContacts: [Contact] {
-        contacts.filter { $0.isProcessable }
+    var processableLeads: [Lead] {
+        leads.filter { $0.isProcessable }
     }
 
     var sentCount: Int {
-        contacts.filter { $0.status == .sent }.count
+        leads.filter { $0.messageStatus == .sent }.count
     }
 
     var failedCount: Int {
-        contacts.filter { $0.status == .failed }.count
+        leads.filter { $0.messageStatus == .failed }.count
     }
 
     var progressPercentage: Double {
-        guard !contacts.isEmpty else { return 0 }
-        let processed = contacts.filter { $0.status == .sent || $0.status == .failed || $0.status == .skipped }.count
-        return Double(processed) / Double(contacts.count)
+        guard !leads.isEmpty else { return 0 }
+        let processed = leads.filter {
+            $0.messageStatus == .sent || $0.messageStatus == .failed || $0.messageStatus == .skipped
+        }.count
+        return Double(processed) / Double(leads.count)
     }
 
-    func loadContacts(from url: URL) async throws {
+    func loadLeads(from url: URL) async throws {
         isLoading = true
         errorMessage = nil
         currentExcelPath = url
 
         do {
-            // Load contacts from Excel
-            var loadedContacts = try await excelService.loadContacts(from: url)
+            // Load leads from Excel
+            var loadedLeads = try await excelService.loadLeads(from: url)
 
             // Merge with saved status
             let savedStatuses = try await statusService.loadStatus(for: url)
-            for i in loadedContacts.indices {
-                if let savedStatus = savedStatuses[loadedContacts[i].linkedInURL] {
+            for i in loadedLeads.indices {
+                if let savedStatus = savedStatuses[loadedLeads[i].linkedInURL] {
                     if let status = MessageStatus(rawValue: savedStatus.status) {
-                        loadedContacts[i].status = status
+                        loadedLeads[i].messageStatus = status
                     }
-                    loadedContacts[i].errorMessage = savedStatus.errorMessage
-                    loadedContacts[i].lastAttemptDate = savedStatus.lastUpdated
+                    loadedLeads[i].errorMessage = savedStatus.errorMessage
+                    loadedLeads[i].lastAttemptDate = savedStatus.lastUpdated
                 }
             }
 
-            contacts = loadedContacts
+            leads = loadedLeads
             isLoading = false
         } catch {
             isLoading = false
@@ -63,61 +66,71 @@ class ContactListViewModel: ObservableObject {
         }
     }
 
-    func markAsSent(_ contact: Contact) {
-        guard let index = contacts.firstIndex(where: { $0.id == contact.id }) else { return }
-        contacts[index].status = .sent
-        contacts[index].lastAttemptDate = Date()
-        contacts[index].errorMessage = nil
-        saveStatus(for: contacts[index])
+    func addLeads(_ newLeads: [Lead]) {
+        leads.append(contentsOf: newLeads)
     }
 
-    func markAsFailed(_ contact: Contact, error: String) {
-        guard let index = contacts.firstIndex(where: { $0.id == contact.id }) else { return }
-        contacts[index].status = .failed
-        contacts[index].lastAttemptDate = Date()
-        contacts[index].errorMessage = error
-        saveStatus(for: contacts[index])
+    func markAsSent(_ lead: Lead) {
+        guard let index = leads.firstIndex(where: { $0.id == lead.id }) else { return }
+        leads[index].messageStatus = .sent
+        leads[index].lastAttemptDate = Date()
+        leads[index].errorMessage = nil
+        leads[index].status = .contacted
+        leads[index].lastContactedAt = Date()
+        saveStatus(for: leads[index])
     }
 
-    func markAsInProgress(_ contact: Contact) {
-        guard let index = contacts.firstIndex(where: { $0.id == contact.id }) else { return }
-        contacts[index].status = .inProgress
-        saveStatus(for: contacts[index])
+    func markAsFailed(_ lead: Lead, error: String) {
+        guard let index = leads.firstIndex(where: { $0.id == lead.id }) else { return }
+        leads[index].messageStatus = .failed
+        leads[index].lastAttemptDate = Date()
+        leads[index].errorMessage = error
+        saveStatus(for: leads[index])
     }
 
-    func markAsSkipped(_ contact: Contact, reason: String) {
-        guard let index = contacts.firstIndex(where: { $0.id == contact.id }) else { return }
-        contacts[index].status = .skipped
-        contacts[index].errorMessage = reason
-        saveStatus(for: contacts[index])
+    func markAsInProgress(_ lead: Lead) {
+        guard let index = leads.firstIndex(where: { $0.id == lead.id }) else { return }
+        leads[index].messageStatus = .inProgress
+        saveStatus(for: leads[index])
     }
 
-    func resetContact(_ contact: Contact) {
-        guard let index = contacts.firstIndex(where: { $0.id == contact.id }) else { return }
-        contacts[index].status = .pending
-        contacts[index].errorMessage = nil
-        saveStatus(for: contacts[index])
+    func markAsSkipped(_ lead: Lead, reason: String) {
+        guard let index = leads.firstIndex(where: { $0.id == lead.id }) else { return }
+        leads[index].messageStatus = .skipped
+        leads[index].errorMessage = reason
+        saveStatus(for: leads[index])
+    }
+
+    func resetLead(_ lead: Lead) {
+        guard let index = leads.firstIndex(where: { $0.id == lead.id }) else { return }
+        leads[index].messageStatus = .pending
+        leads[index].errorMessage = nil
+        saveStatus(for: leads[index])
     }
 
     func resetAllFailed() {
-        for i in contacts.indices where contacts[i].status == .failed {
-            contacts[i].status = .pending
-            contacts[i].errorMessage = nil
+        for i in leads.indices where leads[i].messageStatus == .failed {
+            leads[i].messageStatus = .pending
+            leads[i].errorMessage = nil
         }
         saveAllStatuses()
     }
 
-    private func saveStatus(for contact: Contact) {
+    func clearLeads() {
+        leads.removeAll()
+    }
+
+    private func saveStatus(for lead: Lead) {
         guard let path = currentExcelPath else { return }
         Task {
-            try? await statusService.updateContactStatus(contact, excelPath: path)
+            try? await statusService.updateLeadStatus(lead, excelPath: path)
         }
     }
 
     private func saveAllStatuses() {
         guard let path = currentExcelPath else { return }
         Task {
-            try? await statusService.saveStatus(contacts: contacts, excelPath: path)
+            try? await statusService.saveStatus(leads: leads, excelPath: path)
         }
     }
 }

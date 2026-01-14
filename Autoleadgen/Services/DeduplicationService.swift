@@ -6,17 +6,28 @@ actor DeduplicationService {
     private let storageKey = "seen_linkedin_urls"
 
     init() {
-        loadSeenURLs()
+        // Load synchronously using nonisolated helper
+        seenURLs = Self.loadStoredURLs(forKey: storageKey)
     }
 
     // MARK: - Persistence
 
-    /// Load previously seen URLs from UserDefaults
-    private func loadSeenURLs() {
-        if let data = UserDefaults.standard.data(forKey: storageKey),
+    /// Load previously seen URLs from UserDefaults (nonisolated for init)
+    private nonisolated static func loadStoredURLs(forKey key: String) -> Set<String> {
+        if let data = UserDefaults.standard.data(forKey: key),
            let urls = try? JSONDecoder().decode(Set<String>.self, from: data) {
-            seenURLs = urls
+            return urls
         }
+        return []
+    }
+
+    /// Normalize a LinkedIn URL for deduplication
+    private func normalizeURL(_ url: String) -> String {
+        url.lowercased()
+            .replacingOccurrences(of: "https://", with: "")
+            .replacingOccurrences(of: "http://", with: "")
+            .replacingOccurrences(of: "www.", with: "")
+            .trimmingCharacters(in: CharacterSet(charactersIn: "/"))
     }
 
     /// Save seen URLs to UserDefaults
@@ -30,7 +41,7 @@ actor DeduplicationService {
 
     /// Check if a lead's URL has already been seen
     func isDuplicate(_ lead: ScrapedLead) -> Bool {
-        seenURLs.contains(lead.normalizedURL)
+        seenURLs.contains(normalizeURL(lead.linkedInURL))
     }
 
     /// Check if a normalized URL has already been seen
@@ -42,13 +53,13 @@ actor DeduplicationService {
 
     /// Mark a single lead as seen
     func markAsSeen(_ lead: ScrapedLead) {
-        seenURLs.insert(lead.normalizedURL)
+        seenURLs.insert(normalizeURL(lead.linkedInURL))
     }
 
     /// Mark multiple leads as seen and persist
     func markAsSeen(_ leads: [ScrapedLead]) {
         for lead in leads {
-            seenURLs.insert(lead.normalizedURL)
+            seenURLs.insert(normalizeURL(lead.linkedInURL))
         }
         saveSeenURLs()
     }
@@ -104,23 +115,10 @@ actor DeduplicationService {
         seenURLs.insert(normalizedURL)
     }
 
-    /// Bulk import URLs from existing contacts
-    func importFromContacts(_ contacts: [Contact]) {
-        for contact in contacts {
-            let normalized = contact.linkedInURL.lowercased()
-                .replacingOccurrences(of: "https://", with: "")
-                .replacingOccurrences(of: "http://", with: "")
-                .replacingOccurrences(of: "www.", with: "")
-                .trimmingCharacters(in: CharacterSet(charactersIn: "/"))
-            seenURLs.insert(normalized)
-        }
-        saveSeenURLs()
-    }
-
     /// Bulk import URLs from existing leads
     func importFromLeads(_ leads: [Lead]) {
         for lead in leads {
-            seenURLs.insert(lead.normalizedURL)
+            seenURLs.insert(normalizeURL(lead.linkedInURL))
         }
         saveSeenURLs()
     }

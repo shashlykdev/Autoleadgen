@@ -46,7 +46,7 @@ class LeadsViewModel: ObservableObject {
         isLoading = true
         leads = await leadsService.loadLeads()
         filterLeads()
-        await updateStatistics()
+        updateStatistics()
         isLoading = false
     }
 
@@ -56,14 +56,14 @@ class LeadsViewModel: ObservableObject {
         let newLead = await leadsService.addLead(lead)
         leads.append(newLead)
         filterLeads()
-        await updateStatistics()
+        updateStatistics()
     }
 
     func addLeads(_ newLeads: [Lead]) async -> Int {
         let added = await leadsService.addLeads(newLeads)
         leads.append(contentsOf: added)
         filterLeads()
-        await updateStatistics()
+        updateStatistics()
         return added.count
     }
 
@@ -73,7 +73,7 @@ class LeadsViewModel: ObservableObject {
             leads[index] = lead
         }
         filterLeads()
-        await updateStatistics()
+        updateStatistics()
     }
 
     func deleteLead(_ lead: Lead) async {
@@ -81,7 +81,7 @@ class LeadsViewModel: ObservableObject {
         leads.removeAll { $0.id == lead.id }
         selectedLeads.remove(lead.id)
         filterLeads()
-        await updateStatistics()
+        updateStatistics()
     }
 
     func deleteSelectedLeads() async {
@@ -90,7 +90,15 @@ class LeadsViewModel: ObservableObject {
         leads.removeAll { selectedLeads.contains($0.id) }
         selectedLeads.removeAll()
         filterLeads()
-        await updateStatistics()
+        updateStatistics()
+    }
+
+    func clearAllLeads() async {
+        await leadsService.deleteLeads(leads)
+        leads.removeAll()
+        selectedLeads.removeAll()
+        filterLeads()
+        updateStatistics()
     }
 
     // MARK: - Filtering
@@ -181,32 +189,21 @@ class LeadsViewModel: ObservableObject {
 
     // MARK: - Import/Export
 
-    func exportToCSV() async -> String {
-        await leadsService.exportToCSV()
+    func exportToCSV() -> String {
+        leadsService.exportToCSV()
     }
 
     func importFromCSV(_ content: String) async -> Int {
         let imported = await leadsService.importFromCSV(content)
         leads.append(contentsOf: imported)
         filterLeads()
-        await updateStatistics()
+        updateStatistics()
         return imported.count
     }
 
     // MARK: - Statistics
 
-    func updateStatistics() async {
-        statistics = await leadsService.getStatistics()
-    }
-
-    // MARK: - Convert to Contacts
-
-    func convertToContacts(messageTemplate: String) -> [Contact] {
-        let selectedLeadsList = leads.filter { selectedLeads.contains($0.id) }
-        return selectedLeadsList.map { $0.toContact(messageTemplate: messageTemplate) }
-    }
-
-    func convertAllToContacts(messageTemplate: String) -> [Contact] {
-        filteredLeads.map { $0.toContact(messageTemplate: messageTemplate) }
+    func updateStatistics() {
+        statistics = leadsService.getStatistics()
     }
 }

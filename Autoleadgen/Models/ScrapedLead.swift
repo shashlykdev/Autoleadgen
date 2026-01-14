@@ -44,18 +44,6 @@ struct ScrapedLead: Identifiable, Codable, Hashable {
             .trimmingCharacters(in: CharacterSet(charactersIn: "/"))
     }
 
-    /// Convert to Contact for messaging automation
-    func toContact(withMessage message: String, rowIndex: Int) -> Contact {
-        Contact(
-            firstName: firstName,
-            lastName: lastName.isEmpty ? nil : lastName,
-            linkedInURL: linkedInURL,
-            messageText: message,
-            status: .pending,
-            rowIndex: rowIndex
-        )
-    }
-
     /// Personalize a message template with this lead's data
     func personalizeMessage(_ template: String) -> String {
         template
@@ -69,7 +57,7 @@ struct ScrapedLead: Identifiable, Codable, Hashable {
     }
 
     /// Convert to Lead for persistence in Leads database
-    func toLead(source: String = "Google Search") -> Lead {
+    func toLead(source: String = "Google Search", generatedMessage: String? = nil) -> Lead {
         Lead(
             firstName: firstName,
             lastName: lastName,
@@ -77,7 +65,8 @@ struct ScrapedLead: Identifiable, Codable, Hashable {
             company: company,
             title: title,
             status: .new,
-            source: source
+            source: source,
+            generatedMessage: generatedMessage
         )
     }
 }

@@ -1,6 +1,7 @@
 import Foundation
 
-actor LeadsManagementService {
+@MainActor
+final class LeadsManagementService {
     private var leads: [Lead] = []
     private let storageKey = "autoleadgen_leads"
     private let fileManager = FileManager.default

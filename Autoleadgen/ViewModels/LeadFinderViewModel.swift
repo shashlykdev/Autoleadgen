@@ -1,6 +1,7 @@
 import Foundation
 import WebKit
 import Combine
+import SwiftUI
 
 @MainActor
 class LeadFinderViewModel: ObservableObject {
@@ -19,10 +20,33 @@ class LeadFinderViewModel: ObservableObject {
     @Published var seenURLsCount: Int = 0
     @Published var savedToLeadsCount: Int = 0
 
+    // Profile processing state (Phase 2)
+    @Published var isProcessingProfiles: Bool = false
+    @Published var currentProfileIndex: Int = 0
+    @Published var processedLeads: [Lead] = []
+
+    // AI Settings (read from AppStorage)
+    @AppStorage("aiEnabled") private var aiEnabled: Bool = false
+    @AppStorage("selectedModelId") private var selectedModelId: String = ""
+    @AppStorage("sampleMessage") private var sampleMessage: String = ""
+
     private let scraperService = GoogleScraperService()
     private let deduplicationService = DeduplicationService()
     private let leadsService = LeadsManagementService()
+    private let profileScraperService = LinkedInProfileScraperService()
+    private let aiService = AIMessageService()
     private var searchTask: Task<Void, Never>?
+
+    // Callback for auto-adding to automation queue
+    var onContactsReady: (([Lead]) -> Void)?
+
+    // Hidden WebView for background scraping
+    private lazy var hiddenWebView: WKWebView = {
+        let config = WKWebViewConfiguration()
+        config.websiteDataStore = .default()
+        let webView = WKWebView(frame: .zero, configuration: config)
+        return webView
+    }()
 
     private let maxPages = 50  // Safety limit
 
@@ -35,7 +59,7 @@ class LeadFinderViewModel: ObservableObject {
     // MARK: - Computed Properties
 
     var canSearch: Bool {
-        !role.isEmpty && !location.isEmpty && !isSearching
+        !role.isEmpty && !location.isEmpty && !isSearching && !isProcessingProfiles
     }
 
     var searchQuery: SearchQuery {
@@ -46,9 +70,13 @@ class LeadFinderViewModel: ObservableObject {
         searchQuery.googleSearchURL
     }
 
+    var isWorking: Bool {
+        isSearching || isProcessingProfiles
+    }
+
     // MARK: - Search Control
 
-    func startSearch(webView: WKWebView) {
+    func startSearch() {
         guard canSearch else { return }
 
         isSearching = true
@@ -57,10 +85,12 @@ class LeadFinderViewModel: ObservableObject {
         newLeadsCount = 0
         duplicatesSkipped = 0
         savedToLeadsCount = 0
+        processedLeads = []
+        currentProfileIndex = 0
         statusMessage = "Starting search..."
 
         searchTask = Task {
-            await performSearch(webView: webView)
+            await performSearch()
         }
     }
 
@@ -68,16 +98,18 @@ class LeadFinderViewModel: ObservableObject {
         searchTask?.cancel()
         searchTask = nil
         isSearching = false
+        isProcessingProfiles = false
         statusMessage = "Search stopped"
     }
 
-    private func performSearch(webView: WKWebView) async {
+    private func performSearch() async {
         guard let url = URL(string: searchURL) else {
             statusMessage = "Invalid search URL"
             isSearching = false
             return
         }
 
+        let webView = hiddenWebView
         statusMessage = "Searching..."
         webView.load(URLRequest(url: url))
 
@@ -89,7 +121,7 @@ class LeadFinderViewModel: ObservableObject {
             if Task.isCancelled { break }
 
             currentPage = page + 1
-            statusMessage = "Searching... (\(newLeadsCount)/\(targetLeadsCount) leads)"
+            statusMessage = "Phase 1: Searching... (\(newLeadsCount)/\(targetLeadsCount) leads)"
 
             // Wait for page to fully load
             var waitCount = 0
@@ -107,7 +139,6 @@ class LeadFinderViewModel: ObservableObject {
 
                 // Filter duplicates using DeduplicationService
                 var newOnThisPage = 0
-                var leadsToSave: [Lead] = []
 
                 for lead in pageLeads {
                     // Stop if we've reached the target
@@ -119,22 +150,12 @@ class LeadFinderViewModel: ObservableObject {
                         await deduplicationService.markAsSeen(lead)
                         newOnThisPage += 1
                         newLeadsCount += 1
-
-                        // Convert to Lead for persistence
-                        let searchSource = "\(role) - \(location)"
-                        leadsToSave.append(lead.toLead(source: searchSource))
                     } else {
                         duplicatesSkipped += 1
                     }
                 }
 
-                // Auto-save new leads to database
-                if !leadsToSave.isEmpty {
-                    let saved = await leadsService.addLeads(leadsToSave)
-                    savedToLeadsCount += saved.count
-                }
-
-                statusMessage = "Found \(newLeadsCount) leads (+\(newOnThisPage) new)"
+                statusMessage = "Phase 1: Found \(newLeadsCount) leads (+\(newOnThisPage) new)"
 
             } catch {
                 statusMessage = "Error: \(error.localizedDescription)"
@@ -168,23 +189,94 @@ class LeadFinderViewModel: ObservableObject {
         await updateSeenCount()
 
         isSearching = false
-        statusMessage = "Complete: \(newLeadsCount) leads found, \(savedToLeadsCount) saved, \(duplicatesSkipped) duplicates skipped"
+
+        // Phase 2: Process profiles and generate messages
+        if !scrapedLeads.isEmpty && !Task.isCancelled {
+            await processProfilesAndGenerateMessages()
+        } else {
+            statusMessage = "Complete: \(newLeadsCount) leads found, \(duplicatesSkipped) duplicates skipped"
+        }
     }
 
-    // MARK: - Convert to Contacts
+    // MARK: - Phase 2: Profile Processing & AI Message Generation
 
-    func convertToContacts() -> [Contact] {
-        scrapedLeads.enumerated().map { index, lead in
-            // Message will be AI-generated later during automation
-            return Contact(
-                firstName: lead.firstName,
-                lastName: lead.lastName.isEmpty ? nil : lead.lastName,
-                linkedInURL: lead.linkedInURL,
-                messageText: "",  // AI will generate this from profile data
-                status: .pending,
-                rowIndex: index + 1
-            )
+    private func processProfilesAndGenerateMessages() async {
+        isProcessingProfiles = true
+        currentProfileIndex = 0
+        processedLeads = []
+
+        let webView = hiddenWebView
+        let searchSource = "\(role) - \(location)"
+        let totalLeads = scrapedLeads.count
+
+        for (index, scrapedLead) in scrapedLeads.enumerated() {
+            if Task.isCancelled { break }
+
+            currentProfileIndex = index + 1
+            statusMessage = "Phase 2: Processing profile \(currentProfileIndex)/\(totalLeads) - \(scrapedLead.fullName)"
+
+            var generatedMessage: String? = nil
+
+            // Navigate to LinkedIn profile
+            if let profileURL = URL(string: scrapedLead.linkedInURL) {
+                webView.load(URLRequest(url: profileURL))
+
+                // Wait for page load
+                var waitCount = 0
+                while webView.isLoading && waitCount < 30 {
+                    try? await Task.sleep(nanoseconds: 500_000_000)
+                    waitCount += 1
+                }
+
+                // Extra wait for dynamic content
+                try? await Task.sleep(nanoseconds: 2_000_000_000)
+
+                // Scrape profile data
+                do {
+                    let profileData = try await profileScraperService.scrapeProfile(webView: webView)
+
+                    // Generate AI message if enabled
+                    if aiEnabled && !selectedModelId.isEmpty {
+                        do {
+                            generatedMessage = try await aiService.generateMessage(
+                                modelId: selectedModelId,
+                                profile: profileData,
+                                firstName: scrapedLead.firstName,
+                                sampleMessage: sampleMessage.isEmpty ? nil : sampleMessage
+                            )
+                            statusMessage = "Phase 2: Generated message for \(scrapedLead.fullName)"
+                        } catch {
+                            statusMessage = "Phase 2: AI error for \(scrapedLead.fullName): \(error.localizedDescription)"
+                            // Continue without AI message
+                        }
+                    }
+                } catch {
+                    statusMessage = "Phase 2: Scrape error for \(scrapedLead.fullName)"
+                }
+
+                // Small delay between profiles to avoid rate limiting
+                try? await Task.sleep(nanoseconds: 2_000_000_000)
+            }
+
+            // Create Lead with generated message
+            let lead = scrapedLead.toLead(source: searchSource, generatedMessage: generatedMessage)
+            processedLeads.append(lead)
         }
+
+        // Save leads to database
+        if !processedLeads.isEmpty {
+            let saved = await leadsService.addLeads(processedLeads)
+            savedToLeadsCount = saved.count
+        }
+
+        isProcessingProfiles = false
+
+        // Auto-add to automation queue
+        if !processedLeads.isEmpty {
+            onContactsReady?(processedLeads)
+        }
+
+        statusMessage = "Complete: \(newLeadsCount) leads processed, \(savedToLeadsCount) saved, \(duplicatesSkipped) duplicates skipped"
     }
 
     // MARK: - Deduplication Management
@@ -203,18 +295,12 @@ class LeadFinderViewModel: ObservableObject {
 
     func clearResults() {
         scrapedLeads = []
+        processedLeads = []
         newLeadsCount = 0
         duplicatesSkipped = 0
         savedToLeadsCount = 0
+        currentProfileIndex = 0
         statusMessage = ""
-    }
-
-    /// Import existing contacts to avoid duplicates
-    func importExistingContacts(_ contacts: [Contact]) {
-        Task {
-            await deduplicationService.importFromContacts(contacts)
-            await updateSeenCount()
-        }
     }
 
     /// Import existing leads to avoid duplicates

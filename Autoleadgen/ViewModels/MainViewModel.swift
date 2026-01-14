@@ -64,10 +64,10 @@ class MainViewModel: ObservableObject {
         loggingService.info("Loading Excel file: \(url.lastPathComponent)")
 
         do {
-            try await contactListVM.loadContacts(from: url)
-            loggingService.info("Loaded \(contactListVM.contacts.count) contacts")
+            try await contactListVM.loadLeads(from: url)
+            loggingService.info("Loaded \(contactListVM.leads.count) leads")
 
-            let pending = contactListVM.pendingContacts.count
+            let pending = contactListVM.pendingLeads.count
             let sent = contactListVM.sentCount
             loggingService.info("Status: \(pending) pending, \(sent) already sent")
         } catch {
@@ -77,7 +77,7 @@ class MainViewModel: ObservableObject {
 
     var canStartAutomation: Bool {
         isLoggedIn &&
-        !contactListVM.pendingContacts.isEmpty &&
+        !contactListVM.pendingLeads.isEmpty &&
         automationVM.currentState.canStart
     }
 
@@ -85,29 +85,29 @@ class MainViewModel: ObservableObject {
         guard canStartAutomation else {
             if !isLoggedIn {
                 loggingService.warning("Cannot start: Not logged in to LinkedIn")
-            } else if contactListVM.pendingContacts.isEmpty {
-                loggingService.warning("Cannot start: No pending contacts")
+            } else if contactListVM.pendingLeads.isEmpty {
+                loggingService.warning("Cannot start: No pending leads")
             }
             return
         }
 
-        loggingService.info("Starting automation with \(contactListVM.pendingContacts.count) contacts")
+        loggingService.info("Starting automation with \(contactListVM.pendingLeads.count) leads")
 
         automationVM.start(
-            contacts: contactListVM.pendingContacts,
+            leads: contactListVM.pendingLeads,
             webView: browserVM.webView,
-            onContactStarted: { [weak self] contact in
-                self?.contactListVM.markAsInProgress(contact)
-                self?.loggingService.info("Processing: \(contact.displayName)")
+            onLeadStarted: { [weak self] lead in
+                self?.contactListVM.markAsInProgress(lead)
+                self?.loggingService.info("Processing: \(lead.displayName)")
             },
-            onContactCompleted: { [weak self] contact, result in
+            onLeadCompleted: { [weak self] lead, result in
                 switch result {
                 case .success:
-                    self?.contactListVM.markAsSent(contact)
-                    self?.loggingService.info("Sent message to: \(contact.displayName)")
+                    self?.contactListVM.markAsSent(lead)
+                    self?.loggingService.info("Sent message to: \(lead.displayName)")
                 case .failure(let error):
-                    self?.contactListVM.markAsFailed(contact, error: error.localizedDescription)
-                    self?.loggingService.error("Failed for \(contact.displayName): \(error.localizedDescription)")
+                    self?.contactListVM.markAsFailed(lead, error: error.localizedDescription)
+                    self?.loggingService.error("Failed for \(lead.displayName): \(error.localizedDescription)")
                 }
             }
         )
@@ -130,15 +130,15 @@ class MainViewModel: ObservableObject {
 
     // MARK: - Leads Management
 
-    func addLeadsToContacts(_ contacts: [Contact]) {
-        for contact in contacts {
-            // Check if contact already exists
-            if !contactListVM.contacts.contains(where: {
-                $0.linkedInURL.lowercased() == contact.linkedInURL.lowercased()
+    func addLeads(_ leads: [Lead]) {
+        for lead in leads {
+            // Check if lead already exists
+            if !contactListVM.leads.contains(where: {
+                $0.linkedInURL.lowercased() == lead.linkedInURL.lowercased()
             }) {
-                contactListVM.contacts.append(contact)
+                contactListVM.leads.append(lead)
             }
         }
-        loggingService.info("Added \(contacts.count) leads to contacts")
+        loggingService.info("Added \(leads.count) leads to automation queue")
     }
 }

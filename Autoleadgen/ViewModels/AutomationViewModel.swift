@@ -5,12 +5,12 @@ import Combine
 @MainActor
 class AutomationViewModel: ObservableObject {
     @Published var currentState: AutomationState = .idle
-    @Published var currentContactIndex: Int = 0
-    @Published var totalContacts: Int = 0
+    @Published var currentLeadIndex: Int = 0
+    @Published var totalLeads: Int = 0
     @Published var delayRemaining: Int = 0
     @Published var messageDelayRemaining: Int = 0
 
-    // Configuration - delay between contacts
+    // Configuration - delay between leads
     @Published var minDelaySeconds: Int = 30
     @Published var maxDelaySeconds: Int = 90
 
@@ -20,8 +20,8 @@ class AutomationViewModel: ObservableObject {
 
     // AI Settings (read from AppStorage)
     @AppStorage("aiEnabled") private var aiEnabled: Bool = false
-    @AppStorage("aiProvider") private var aiProviderRaw: String = "OpenAI"
-    @AppStorage("aiApiKey") private var aiApiKey: String = ""
+    @AppStorage("selectedModelId") private var selectedModelId: String = ""
+    @AppStorage("sampleMessage") private var sampleMessage: String = ""
 
     private var automationTask: Task<Void, Never>?
     private var isPaused: Bool = false
@@ -30,28 +30,28 @@ class AutomationViewModel: ObservableObject {
     private let aiService = AIMessageService()
 
     var progress: Double {
-        guard totalContacts > 0 else { return 0 }
-        return Double(currentContactIndex) / Double(totalContacts)
+        guard totalLeads > 0 else { return 0 }
+        return Double(currentLeadIndex) / Double(totalLeads)
     }
 
     func start(
-        contacts: [Contact],
+        leads: [Lead],
         webView: WKWebView,
-        onContactStarted: @escaping (Contact) -> Void,
-        onContactCompleted: @escaping (Contact, Result<Void, Error>) -> Void
+        onLeadStarted: @escaping (Lead) -> Void,
+        onLeadCompleted: @escaping (Lead, Result<Void, Error>) -> Void
     ) {
         guard currentState.canStart else { return }
-        guard !contacts.isEmpty else { return }
+        guard !leads.isEmpty else { return }
 
-        totalContacts = contacts.count
-        currentContactIndex = 0
+        totalLeads = leads.count
+        currentLeadIndex = 0
         isPaused = false
         currentState = .running
 
         automationTask = Task { [weak self] in
             guard let self = self else { return }
 
-            for (index, contact) in contacts.enumerated() {
+            for (index, lead) in leads.enumerated() {
                 // Check for pause
                 while self.isPaused {
                     try? await Task.sleep(nanoseconds: 500_000_000)
@@ -60,20 +60,20 @@ class AutomationViewModel: ObservableObject {
 
                 if Task.isCancelled { return }
 
-                self.currentContactIndex = index
-                self.currentState = .processingContact(contactName: contact.displayName)
-                onContactStarted(contact)
+                self.currentLeadIndex = index
+                self.currentState = .processingContact(contactName: lead.displayName)
+                onLeadStarted(lead)
 
-                // Process the contact
+                // Process the lead
                 do {
-                    try await self.processContact(contact, webView: webView)
-                    onContactCompleted(contact, .success(()))
+                    try await self.processLead(lead, webView: webView)
+                    onLeadCompleted(lead, .success(()))
                 } catch {
-                    onContactCompleted(contact, .failure(error))
+                    onLeadCompleted(lead, .failure(error))
                 }
 
-                // Random delay before next contact (except for last one)
-                if index < contacts.count - 1 {
+                // Random delay before next lead (except for last one)
+                if index < leads.count - 1 {
                     let delay = self.delayService.randomDelay(
                         min: self.minDelaySeconds,
                         max: self.maxDelaySeconds
@@ -84,69 +84,75 @@ class AutomationViewModel: ObservableObject {
                 }
             }
 
-            self.currentContactIndex = contacts.count
+            self.currentLeadIndex = leads.count
             self.currentState = .completed
         }
     }
 
-    private func processContact(_ contact: Contact, webView: WKWebView) async throws {
+    private func processLead(_ lead: Lead, webView: WKWebView) async throws {
         // Step 1: Navigate to profile
-        try await navigateToProfile(contact.linkedInURL, webView: webView)
+        try await navigateToProfile(lead.linkedInURL, webView: webView)
 
-        // Step 2: Scrape profile data for personalization
-        let profileData = try await profileScraperService.scrapeProfile(webView: webView)
-
-        // Step 3: Generate or personalize message
+        // Step 2: Determine the message to send
         let finalMessage: String
-        if aiEnabled && !aiApiKey.isEmpty {
-            // Use AI to generate message
-            do {
-                let provider = AIProvider(rawValue: aiProviderRaw) ?? .openai
-                finalMessage = try await aiService.generateMessage(
-                    provider: provider,
-                    apiKey: aiApiKey,
-                    profile: profileData,
-                    firstName: contact.firstName ?? "there"
-                )
-            } catch {
-                // Fallback to template-based personalization
-                finalMessage = personalizeMessage(contact, with: profileData)
-            }
+
+        // Check if lead already has a pre-generated message (from Lead Finder)
+        if !lead.effectiveMessage.isEmpty {
+            // Use pre-generated message - skip profile scraping and AI generation
+            finalMessage = lead.personalizedMessage()
         } else {
-            // Use template-based personalization
-            finalMessage = personalizeMessage(contact, with: profileData)
+            // No pre-generated message - scrape profile and generate on the fly
+            let profileData = try await profileScraperService.scrapeProfile(webView: webView)
+
+            if aiEnabled && !selectedModelId.isEmpty {
+                // Use AI to generate message with cloud API keys
+                do {
+                    finalMessage = try await aiService.generateMessage(
+                        modelId: selectedModelId,
+                        profile: profileData,
+                        firstName: lead.firstName.isEmpty ? "there" : lead.firstName,
+                        sampleMessage: sampleMessage.isEmpty ? nil : sampleMessage
+                    )
+                } catch {
+                    // Fallback to template-based personalization
+                    finalMessage = personalizeMessage(lead, with: profileData)
+                }
+            } else {
+                // Use template-based personalization
+                finalMessage = personalizeMessage(lead, with: profileData)
+            }
         }
 
-        // Step 4: Find and click Message button
+        // Step 3: Find and click Message button
         try await clickMessageButton(webView: webView)
 
-        // Step 5: Wait for message dialog
+        // Step 4: Wait for message dialog
         try await waitForMessageDialog(webView: webView)
 
-        // Step 6: Type message
+        // Step 5: Type message
         try await typeMessage(finalMessage, webView: webView)
 
-        // Step 7: Wait 5-15 seconds before sending (random delay)
+        // Step 6: Wait 5-15 seconds before sending (random delay)
         let messageDelay = delayService.randomDelay(
             min: minMessageDelaySeconds,
             max: maxMessageDelaySeconds
         )
         await performMessageDelay(seconds: messageDelay)
 
-        // Step 8: Click send
+        // Step 7: Click send
         try await clickSendButton(webView: webView)
 
-        // Step 9: Verify message sent
+        // Step 8: Verify message sent
         try await verifyMessageSent(webView: webView)
     }
 
-    private func personalizeMessage(_ contact: Contact, with profile: ProfileData) -> String {
-        var message = contact.messageText
+    private func personalizeMessage(_ lead: Lead, with profile: ProfileData) -> String {
+        var message = lead.messageText
 
-        // Replace contact placeholders
-        message = message.replacingOccurrences(of: "{firstName}", with: contact.firstName ?? "")
-        message = message.replacingOccurrences(of: "{lastName}", with: contact.lastName ?? "")
-        message = message.replacingOccurrences(of: "{fullName}", with: contact.fullName)
+        // Replace lead placeholders
+        message = message.replacingOccurrences(of: "{firstName}", with: lead.firstName)
+        message = message.replacingOccurrences(of: "{lastName}", with: lead.lastName)
+        message = message.replacingOccurrences(of: "{fullName}", with: lead.fullName)
 
         // Replace profile placeholders
         message = message.replacingOccurrences(of: "{headline}", with: profile.headline ?? "")

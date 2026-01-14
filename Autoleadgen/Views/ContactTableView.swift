@@ -1,65 +1,65 @@
 import SwiftUI
 
 struct ContactTableView: View {
-    let contacts: [Contact]
-    var onResetContact: ((Contact) -> Void)?
+    let leads: [Lead]
+    var onResetLead: ((Lead) -> Void)?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack {
-                Text("Contacts")
+                Text("Automation Queue")
                     .font(.headline)
                 Spacer()
-                Text("\(contacts.count) total")
+                Text("\(leads.count) total")
                     .font(.caption)
                     .foregroundColor(.secondary)
             }
 
-            if contacts.isEmpty {
+            if leads.isEmpty {
                 VStack {
                     Spacer()
-                    Text("No contacts loaded")
+                    Text("No leads in queue")
                         .foregroundColor(.secondary)
-                    Text("Select an Excel file to load contacts")
+                    Text("Load a CSV file or add leads from Lead Finder")
                         .font(.caption)
                         .foregroundColor(.secondary)
                     Spacer()
                 }
                 .frame(maxWidth: .infinity, minHeight: 100)
             } else {
-                Table(contacts) {
-                    TableColumn("Status") { contact in
+                Table(leads) {
+                    TableColumn("Status") { lead in
                         HStack(spacing: 4) {
-                            Image(systemName: contact.status.systemImage)
-                                .foregroundColor(contact.status.displayColor)
-                            Text(contact.status.rawValue)
+                            Image(systemName: lead.messageStatus.systemImage)
+                                .foregroundColor(lead.messageStatus.displayColor)
+                            Text(lead.messageStatus.rawValue)
                                 .font(.caption)
                         }
                         .frame(width: 80, alignment: .leading)
                     }
                     .width(90)
 
-                    TableColumn("LinkedIn Profile") { contact in
-                        Text(contact.displayName)
+                    TableColumn("LinkedIn Profile") { lead in
+                        Text(lead.displayName)
                             .lineLimit(1)
                             .truncationMode(.tail)
-                            .help(contact.linkedInURL)
+                            .help(lead.linkedInURL)
                     }
                     .width(min: 100, ideal: 150)
 
-                    TableColumn("Message Preview") { contact in
-                        Text(contact.messageText)
+                    TableColumn("Message Preview") { lead in
+                        Text(lead.effectiveMessage)
                             .lineLimit(1)
                             .truncationMode(.tail)
                             .foregroundColor(.secondary)
-                            .help(contact.messageText)
+                            .help(lead.effectiveMessage)
                     }
                     .width(min: 100, ideal: 200)
 
-                    TableColumn("") { contact in
-                        if contact.status == .failed {
+                    TableColumn("") { lead in
+                        if lead.messageStatus == .failed {
                             Button("Retry") {
-                                onResetContact?(contact)
+                                onResetLead?(lead)
                             }
                             .buttonStyle(.borderless)
                             .font(.caption)
@@ -76,21 +76,21 @@ struct ContactTableView: View {
     }
 }
 
-struct ContactRowView: View {
-    let contact: Contact
+struct AutomationQueueRowView: View {
+    let lead: Lead
     var onReset: (() -> Void)?
 
     var body: some View {
         HStack {
-            Image(systemName: contact.status.systemImage)
-                .foregroundColor(contact.status.displayColor)
+            Image(systemName: lead.messageStatus.systemImage)
+                .foregroundColor(lead.messageStatus.displayColor)
                 .frame(width: 20)
 
             VStack(alignment: .leading, spacing: 2) {
-                Text(contact.displayName)
+                Text(lead.displayName)
                     .lineLimit(1)
 
-                if let error = contact.errorMessage {
+                if let error = lead.errorMessage {
                     Text(error)
                         .font(.caption)
                         .foregroundColor(.red)
@@ -100,11 +100,11 @@ struct ContactRowView: View {
 
             Spacer()
 
-            Text(contact.status.rawValue)
+            Text(lead.messageStatus.rawValue)
                 .font(.caption)
                 .foregroundColor(.secondary)
 
-            if contact.status == .failed, let onReset = onReset {
+            if lead.messageStatus == .failed, let onReset = onReset {
                 Button("Retry") {
                     onReset()
                 }

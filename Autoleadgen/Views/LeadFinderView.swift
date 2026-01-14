@@ -1,15 +1,18 @@
 import SwiftUI
-import WebKit
 
 struct LeadFinderView: View {
     @ObservedObject var viewModel: LeadFinderViewModel
-    let webView: WKWebView
-    let onAddContacts: ([Contact]) -> Void
+    let onAddContacts: ([Lead]) -> Void
 
     // AI Settings
     @AppStorage("aiEnabled") private var aiEnabled: Bool = false
-    @AppStorage("aiProvider") private var providerRaw: String = "OpenAI"
-    @AppStorage("aiApiKey") private var apiKey: String = ""
+    @AppStorage("selectedModelId") private var selectedModelId: String = ""
+    @AppStorage("sampleMessage") private var sampleMessage: String = ""
+
+    // Models state
+    @State private var availableModels: [CloudKeyStorageService.AIModel] = []
+    @State private var isLoadingModels: Bool = false
+    @State private var modelsError: String?
 
     var body: some View {
         ScrollView {
@@ -34,7 +37,7 @@ struct LeadFinderView: View {
                 searchControlsSection
 
                 // Progress
-                if viewModel.isSearching {
+                if viewModel.isWorking {
                     progressSection
                 }
 
@@ -61,6 +64,16 @@ struct LeadFinderView: View {
                 actionsSection
             }
             .padding()
+        }
+        .onAppear {
+            // Set up callback for auto-adding contacts
+            viewModel.onContactsReady = { contacts in
+                onAddContacts(contacts)
+            }
+
+            if availableModels.isEmpty {
+                loadModels()
+            }
         }
     }
 
@@ -101,33 +114,80 @@ struct LeadFinderView: View {
 
             if aiEnabled {
                 HStack(spacing: 12) {
-                    // Provider picker
-                    Picker("", selection: $providerRaw) {
-                        ForEach(AIProvider.allCases, id: \.rawValue) { p in
-                            Text(p.rawValue).tag(p.rawValue)
+                    // Model picker
+                    if isLoadingModels {
+                        ProgressView()
+                            .scaleEffect(0.8)
+                        Text("Loading models...")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                    } else if let error = modelsError {
+                        HStack {
+                            Image(systemName: "exclamationmark.triangle")
+                                .foregroundColor(.orange)
+                            Text(error)
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                            Button("Retry") {
+                                loadModels()
+                            }
+                            .buttonStyle(.bordered)
+                            .controlSize(.small)
                         }
-                    }
-                    .pickerStyle(.segmented)
-                    .frame(maxWidth: 250)
-
-                    // API Key
-                    SecureField("API Key", text: $apiKey)
-                        .textFieldStyle(.roundedBorder)
-                        .frame(maxWidth: 200)
-
-                    // Status indicator
-                    if !apiKey.isEmpty {
-                        Image(systemName: "checkmark.circle.fill")
-                            .foregroundColor(.green)
                     } else {
-                        Image(systemName: "exclamationmark.circle")
-                            .foregroundColor(.orange)
+                        Picker("Model", selection: $selectedModelId) {
+                            Text("Select a model").tag("")
+                            ForEach(groupedModels, id: \.key) { provider, models in
+                                Section(header: Text(provider.capitalized)) {
+                                    ForEach(models) { model in
+                                        Text(model.name).tag(model.id)
+                                    }
+                                }
+                            }
+                        }
+                        .frame(maxWidth: 300)
+
+                        // Status indicator
+                        if !selectedModelId.isEmpty {
+                            Image(systemName: "checkmark.circle.fill")
+                                .foregroundColor(.green)
+                        }
+
+                        Spacer()
+
+                        Button {
+                            loadModels()
+                        } label: {
+                            Image(systemName: "arrow.clockwise")
+                        }
+                        .buttonStyle(.bordered)
+                        .controlSize(.small)
+                        .help("Refresh models")
                     }
                 }
 
-                Text("Messages will be AI-generated from scraped profile data (headline, experience, education)")
-                    .font(.caption)
-                    .foregroundColor(.secondary)
+                if !selectedModelId.isEmpty, let model = availableModels.first(where: { $0.id == selectedModelId }) {
+                    Text("Using \(model.provider.capitalized) • \(model.name)")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                }
+
+                // Sample message field
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Sample Message (for AI reference)")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                    TextEditor(text: $sampleMessage)
+                        .font(.system(.body, design: .monospaced))
+                        .frame(minHeight: 80, maxHeight: 120)
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 4)
+                                .stroke(Color.gray.opacity(0.3), lineWidth: 1)
+                        )
+                    Text("Provide a sample message style for the AI to follow when generating personalized messages")
+                        .font(.caption2)
+                        .foregroundColor(.secondary)
+                }
             }
         }
         .padding(10)
@@ -135,20 +195,51 @@ struct LeadFinderView: View {
         .cornerRadius(8)
     }
 
+    private var groupedModels: [(key: String, value: [CloudKeyStorageService.AIModel])] {
+        Dictionary(grouping: availableModels, by: { $0.provider })
+            .sorted { $0.key < $1.key }
+            .map { (key: $0.key, value: $0.value) }
+    }
+
+    private func loadModels() {
+        isLoadingModels = true
+        modelsError = nil
+
+        Task {
+            do {
+                let models = try await CloudKeyStorageService.shared.fetchModels()
+                await MainActor.run {
+                    availableModels = models
+                    isLoadingModels = false
+
+                    // Auto-select first model if none selected
+                    if selectedModelId.isEmpty, let first = models.first {
+                        selectedModelId = first.id
+                    }
+                }
+            } catch {
+                await MainActor.run {
+                    modelsError = error.localizedDescription
+                    isLoadingModels = false
+                }
+            }
+        }
+    }
+
     // MARK: - Search Controls
 
     private var searchControlsSection: some View {
         HStack {
-            Button(viewModel.isSearching ? "Stop" : "Find Leads") {
-                if viewModel.isSearching {
+            Button(viewModel.isWorking ? "Stop" : "Find Leads") {
+                if viewModel.isWorking {
                     viewModel.stopSearch()
                 } else {
-                    viewModel.startSearch(webView: webView)
+                    viewModel.startSearch()
                 }
             }
             .buttonStyle(.borderedProminent)
-            .tint(viewModel.isSearching ? .red : .blue)
-            .disabled(!viewModel.canSearch && !viewModel.isSearching)
+            .tint(viewModel.isWorking ? .red : .blue)
+            .disabled(!viewModel.canSearch && !viewModel.isWorking)
 
             Spacer()
 
@@ -157,7 +248,7 @@ struct LeadFinderView: View {
                 Stepper("\(viewModel.targetLeadsCount) leads", value: $viewModel.targetLeadsCount, in: 10...500, step: 10)
                     .frame(width: 140)
             }
-            .disabled(viewModel.isSearching)
+            .disabled(viewModel.isWorking)
         }
     }
 
@@ -165,14 +256,28 @@ struct LeadFinderView: View {
 
     private var progressSection: some View {
         VStack(spacing: 8) {
-            ProgressView(value: Double(viewModel.newLeadsCount), total: Double(viewModel.targetLeadsCount))
+            if viewModel.isSearching {
+                // Phase 1: Google search progress
+                ProgressView(value: Double(viewModel.newLeadsCount), total: Double(viewModel.targetLeadsCount))
 
-            HStack {
-                ProgressView()
-                    .scaleEffect(0.7)
-                Text("Found \(viewModel.newLeadsCount) of \(viewModel.targetLeadsCount) leads...")
-                    .font(.caption)
-                Spacer()
+                HStack {
+                    ProgressView()
+                        .scaleEffect(0.7)
+                    Text("Phase 1: Found \(viewModel.newLeadsCount) of \(viewModel.targetLeadsCount) leads...")
+                        .font(.caption)
+                    Spacer()
+                }
+            } else if viewModel.isProcessingProfiles {
+                // Phase 2: Profile processing progress
+                ProgressView(value: Double(viewModel.currentProfileIndex), total: Double(viewModel.scrapedLeads.count))
+
+                HStack {
+                    ProgressView()
+                        .scaleEffect(0.7)
+                    Text("Phase 2: Processing profile \(viewModel.currentProfileIndex) of \(viewModel.scrapedLeads.count)...")
+                        .font(.caption)
+                    Spacer()
+                }
             }
         }
     }
@@ -181,8 +286,8 @@ struct LeadFinderView: View {
 
     private var statusSection: some View {
         HStack {
-            Image(systemName: viewModel.isSearching ? "magnifyingglass" : "checkmark.circle")
-                .foregroundColor(viewModel.isSearching ? .blue : .green)
+            Image(systemName: viewModel.isWorking ? "magnifyingglass" : "checkmark.circle")
+                .foregroundColor(viewModel.isWorking ? .blue : .green)
             Text(viewModel.statusMessage)
                 .font(.caption)
             Spacer()
@@ -196,28 +301,19 @@ struct LeadFinderView: View {
 
     private var actionsSection: some View {
         HStack {
-            if !viewModel.scrapedLeads.isEmpty && !viewModel.isSearching {
-                Button("Add \(viewModel.scrapedLeads.count) Leads to Contacts") {
-                    let contacts = viewModel.convertToContacts()
-                    onAddContacts(contacts)
-                    viewModel.clearResults()
-                }
-                .buttonStyle(.borderedProminent)
-                .tint(.green)
-            }
-
             Spacer()
 
             Button("Clear Results") {
                 viewModel.clearResults()
             }
             .buttonStyle(.bordered)
-            .disabled(viewModel.scrapedLeads.isEmpty)
+            .disabled(viewModel.scrapedLeads.isEmpty || viewModel.isWorking)
 
             Button("Clear History") {
                 viewModel.clearHistory()
             }
             .buttonStyle(.bordered)
+            .disabled(viewModel.isWorking)
         }
     }
 }

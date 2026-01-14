@@ -17,20 +17,26 @@ class BrowserViewModel: ObservableObject {
 
     init() {
         self.webView = WKWebView.createLinkedInWebView()
-        setupObservations()
         loadLinkedIn()
         startLoginCheck()
+        // Defer observation setup to after init completes
+        let viewModel = self
+        Task { @MainActor in
+            viewModel.setupObservations()
+        }
     }
 
     private func setupObservations() {
-        // Observe loading state
-        observation = webView.observe(\.isLoading) { [weak self] webView, _ in
-            Task { @MainActor in
-                self?.isLoading = webView.isLoading
-                self?.canGoBack = webView.canGoBack
-                self?.canGoForward = webView.canGoForward
-                self?.currentURL = webView.url
-                self?.pageTitle = webView.title ?? ""
+        // Observe loading state using a local reference to avoid capturing self as var
+        observation = webView.observe(\.isLoading) { [weak self] observedWebView, _ in
+            guard let self else { return }
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                self.isLoading = observedWebView.isLoading
+                self.canGoBack = observedWebView.canGoBack
+                self.canGoForward = observedWebView.canGoForward
+                self.currentURL = observedWebView.url
+                self.pageTitle = observedWebView.title ?? ""
             }
         }
     }

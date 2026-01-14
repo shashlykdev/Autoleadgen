@@ -30,7 +30,11 @@ struct LinkedInWebView: NSViewRepresentable {
 extension WKWebView {
     static func createLinkedInWebView() -> WKWebView {
         let configuration = WKWebViewConfiguration()
-        configuration.preferences.javaScriptEnabled = true
+
+        // Enable JavaScript using the modern API
+        let pagePreferences = WKWebpagePreferences()
+        pagePreferences.allowsContentJavaScript = true
+        configuration.defaultWebpagePreferences = pagePreferences
 
         // Enable developer extras for debugging (optional)
         if #available(macOS 13.3, *) {

@@ -1,4 +1,5 @@
 import Foundation
+import SwiftUI
 
 enum LeadStatus: String, Codable, CaseIterable {
     case new = "New"
@@ -32,9 +33,17 @@ struct Lead: Identifiable, Codable, Equatable {
     var tags: [String]
     var status: LeadStatus
     var source: String?
+    var generatedMessage: String?
     var createdAt: Date
     var updatedAt: Date
     var lastContactedAt: Date?
+
+    // Messaging automation fields
+    var messageStatus: MessageStatus
+    var messageText: String
+    var lastAttemptDate: Date?
+    var errorMessage: String?
+    var rowIndex: Int
 
     init(
         id: UUID = UUID(),
@@ -50,9 +59,15 @@ struct Lead: Identifiable, Codable, Equatable {
         tags: [String] = [],
         status: LeadStatus = .new,
         source: String? = nil,
+        generatedMessage: String? = nil,
         createdAt: Date = Date(),
         updatedAt: Date = Date(),
-        lastContactedAt: Date? = nil
+        lastContactedAt: Date? = nil,
+        messageStatus: MessageStatus = .pending,
+        messageText: String = "",
+        lastAttemptDate: Date? = nil,
+        errorMessage: String? = nil,
+        rowIndex: Int = 0
     ) {
         self.id = id
         self.firstName = firstName
@@ -67,13 +82,34 @@ struct Lead: Identifiable, Codable, Equatable {
         self.tags = tags
         self.status = status
         self.source = source
+        self.generatedMessage = generatedMessage
         self.createdAt = createdAt
         self.updatedAt = updatedAt
         self.lastContactedAt = lastContactedAt
+        self.messageStatus = messageStatus
+        self.messageText = messageText
+        self.lastAttemptDate = lastAttemptDate
+        self.errorMessage = errorMessage
+        self.rowIndex = rowIndex
     }
 
     var fullName: String {
         "\(firstName) \(lastName)".trimmingCharacters(in: .whitespaces)
+    }
+
+    var displayName: String {
+        if !firstName.isEmpty {
+            if !lastName.isEmpty {
+                return "\(firstName) \(lastName)"
+            }
+            return firstName
+        }
+        if let url = URL(string: linkedInURL),
+           let lastComponent = url.pathComponents.last,
+           lastComponent != "/" {
+            return lastComponent
+        }
+        return linkedInURL
     }
 
     var normalizedURL: String {
@@ -84,22 +120,27 @@ struct Lead: Identifiable, Codable, Equatable {
             .trimmingCharacters(in: CharacterSet(charactersIn: "/"))
     }
 
-    /// Convert to Contact for messaging automation
-    func toContact(messageTemplate: String) -> Contact {
-        let personalizedMessage = messageTemplate
-            .replacingOccurrences(of: "{firstName}", with: firstName)
-            .replacingOccurrences(of: "{lastName}", with: lastName)
-            .replacingOccurrences(of: "{fullName}", with: fullName)
-            .replacingOccurrences(of: "{company}", with: company ?? "")
-            .replacingOccurrences(of: "{title}", with: title ?? "")
+    var isProcessable: Bool {
+        messageStatus == .pending || messageStatus == .failed
+    }
 
-        return Contact(
-            firstName: firstName,
-            lastName: lastName,
-            linkedInURL: linkedInURL,
-            messageText: personalizedMessage,
-            status: .pending,
-            rowIndex: 0
-        )
+    /// Get the message to send - uses generatedMessage if available, otherwise messageText
+    var effectiveMessage: String {
+        if let generated = generatedMessage, !generated.isEmpty {
+            return generated
+        }
+        return messageText
+    }
+
+    /// Personalize message text by replacing placeholders
+    func personalizedMessage() -> String {
+        var message = effectiveMessage
+        message = message.replacingOccurrences(of: "{firstName}", with: firstName)
+        message = message.replacingOccurrences(of: "{lastName}", with: lastName)
+        message = message.replacingOccurrences(of: "{fullName}", with: fullName)
+        message = message.replacingOccurrences(of: "{company}", with: company ?? "")
+        message = message.replacingOccurrences(of: "{title}", with: title ?? "")
+        message = message.replacingOccurrences(of: "  ", with: " ")
+        return message.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 }

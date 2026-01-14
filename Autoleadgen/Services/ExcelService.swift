@@ -1,11 +1,12 @@
 import Foundation
 
-actor ExcelService {
+@MainActor
+final class ExcelService {
 
-    /// Loads contacts from a CSV file
+    /// Loads leads from a CSV file
     /// Expected format: FirstName, LastName, LinkedIn URL, Message Text, Status (optional)
     /// First row is treated as header and skipped
-    func loadContacts(from url: URL) async throws -> [Contact] {
+    func loadLeads(from url: URL) async throws -> [Lead] {
         // Request access to the file
         let hasAccess = url.startAccessingSecurityScopedResource()
         defer {
@@ -26,7 +27,7 @@ actor ExcelService {
         }
     }
 
-    private func loadFromCSV(url: URL) async throws -> [Contact] {
+    private func loadFromCSV(url: URL) async throws -> [Lead] {
         let content: String
         do {
             content = try String(contentsOf: url, encoding: .utf8)
@@ -34,7 +35,7 @@ actor ExcelService {
             throw AppError.fileNotFound(url.path)
         }
 
-        var contacts: [Contact] = []
+        var leads: [Lead] = []
         let lines = content.components(separatedBy: .newlines)
 
         // Skip header row (index 0)
@@ -56,20 +57,21 @@ actor ExcelService {
 
             guard !linkedInURL.isEmpty else { continue }
 
-            let status = MessageStatus(rawValue: statusText) ?? .pending
+            let messageStatus = MessageStatus(rawValue: statusText) ?? .pending
 
-            let contact = Contact(
-                firstName: firstName.isEmpty ? nil : firstName,
-                lastName: lastName.isEmpty ? nil : lastName,
+            let lead = Lead(
+                firstName: firstName,
+                lastName: lastName,
                 linkedInURL: linkedInURL,
+                source: "CSV Import",
+                messageStatus: messageStatus,
                 messageText: messageText,
-                status: status,
                 rowIndex: index + 1  // 1-based row number
             )
-            contacts.append(contact)
+            leads.append(lead)
         }
 
-        return contacts
+        return leads
     }
 
     /// Parses a CSV line, handling quoted fields with commas

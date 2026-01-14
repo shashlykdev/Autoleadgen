@@ -33,12 +33,11 @@ struct MainView: View {
                     automationTab
                         .tag(0)
 
-                    // Tab 1: Lead Finder (Google Search)
+                    // Tab 1: Lead Finder
                     LeadFinderView(
                         viewModel: viewModel.leadFinderVM,
-                        webView: viewModel.browserVM.webView,
-                        onAddContacts: { contacts in
-                            viewModel.addLeadsToContacts(contacts)
+                        onAddContacts: { leads in
+                            viewModel.addLeads(leads)
                         }
                     )
                     .tag(1)
@@ -46,8 +45,8 @@ struct MainView: View {
                     // Tab 2: Leads Management
                     LeadsManagementView(
                         viewModel: viewModel.leadsVM,
-                        onAddToContacts: { contacts in
-                            viewModel.addLeadsToContacts(contacts)
+                        onAddToContacts: { leads in
+                            viewModel.addLeads(leads)
                         }
                     )
                     .tag(2)
@@ -152,10 +151,10 @@ struct MainView: View {
                     Text(viewModel.contactListVM.currentExcelPath?.lastPathComponent ?? "No file selected")
                         .foregroundColor(viewModel.contactListVM.currentExcelPath != nil ? .primary : .secondary)
 
-                    if !viewModel.contactListVM.contacts.isEmpty {
+                    if !viewModel.contactListVM.leads.isEmpty {
                         HStack(spacing: 16) {
-                            Label("\(viewModel.contactListVM.contacts.count) contacts", systemImage: "person.2")
-                            Label("\(viewModel.contactListVM.pendingContacts.count) pending", systemImage: "clock")
+                            Label("\(viewModel.contactListVM.leads.count) leads", systemImage: "person.2")
+                            Label("\(viewModel.contactListVM.pendingLeads.count) pending", systemImage: "clock")
                             Label("\(viewModel.contactListVM.sentCount) sent", systemImage: "checkmark.circle")
                         }
                         .font(.caption)
@@ -170,7 +169,7 @@ struct MainView: View {
                 }
                 .buttonStyle(.bordered)
 
-                if !viewModel.contactListVM.contacts.isEmpty {
+                if !viewModel.contactListVM.leads.isEmpty {
                     Button("Reset Failed") {
                         viewModel.contactListVM.resetAllFailed()
                     }
@@ -220,9 +219,9 @@ struct MainView: View {
                 )
                 ProgressSection(automationVM: viewModel.automationVM)
                 ContactTableView(
-                    contacts: viewModel.contactListVM.contacts,
-                    onResetContact: { contact in
-                        viewModel.contactListVM.resetContact(contact)
+                    leads: viewModel.contactListVM.leads,
+                    onResetLead: { lead in
+                        viewModel.contactListVM.resetLead(lead)
                     }
                 )
                 .frame(minHeight: 200, maxHeight: 300)
@@ -238,8 +237,6 @@ struct MainView: View {
     private var settingsTab: some View {
         ScrollView {
             VStack(spacing: 16) {
-                AISettingsView()
-
                 // Message Delay Settings
                 VStack(alignment: .leading, spacing: 12) {
                     Text("Message Delay Settings")
@@ -282,7 +279,7 @@ struct MainView: View {
                         .font(.headline)
 
                     HStack {
-                        Text("Delay between contacts:")
+                        Text("Delay between leads:")
                         Spacer()
                         Text("\(viewModel.automationVM.minDelaySeconds)-\(viewModel.automationVM.maxDelaySeconds) seconds")
                             .foregroundColor(.secondary)
