@@ -110,8 +110,12 @@ struct MainView: View {
             } else {
                 Picker("", selection: $viewModel.selectedModelId) {
                     Text("Select model").tag("")
-                    ForEach(viewModel.availableModels) { model in
-                        Text(model.name).tag(model.id)
+                    ForEach(groupedModelProviders, id: \.self) { provider in
+                        Section(header: Text(provider.capitalized)) {
+                            ForEach(modelsForProvider(provider)) { model in
+                                Text(model.name).tag(model.id)
+                            }
+                        }
                     }
                 }
                 .frame(maxWidth: .infinity)
@@ -127,6 +131,23 @@ struct MainView: View {
         .padding(.vertical, 6)
         .background(Color(NSColor.controlBackgroundColor))
         .cornerRadius(6)
+    }
+
+    /// Get unique providers in display order (Apple first, then alphabetical)
+    private var groupedModelProviders: [String] {
+        let providers = Set(viewModel.availableModels.map { $0.provider.lowercased() })
+        var sorted = providers.sorted()
+        // Move Apple to front if present
+        if let appleIndex = sorted.firstIndex(of: "apple") {
+            sorted.remove(at: appleIndex)
+            sorted.insert("apple", at: 0)
+        }
+        return sorted
+    }
+
+    /// Get models for a specific provider
+    private func modelsForProvider(_ provider: String) -> [CloudKeyStorageService.AIModel] {
+        viewModel.availableModels.filter { $0.provider.lowercased() == provider }
     }
 
     // MARK: - Browser Toolbar
