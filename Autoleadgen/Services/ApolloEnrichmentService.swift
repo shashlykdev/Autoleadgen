@@ -82,6 +82,60 @@ actor ApolloEnrichmentService {
         let wasFound: Bool
     }
 
+    // MARK: - Credits Info
+
+    struct CreditsInfo {
+        let used: Int
+        let total: Int
+        let remaining: Int
+    }
+
+    /// Fetch current credits usage from Apollo
+    func fetchCredits(apiKey: String) async throws -> CreditsInfo {
+        guard let url = URL(string: "https://api.apollo.io/api/v1/auth/health") else {
+            throw ApolloError.invalidURL
+        }
+
+        var request = URLRequest(url: url)
+        request.httpMethod = "GET"
+        request.setValue("application/json", forHTTPHeaderField: "Accept")
+        request.setValue(apiKey, forHTTPHeaderField: "x-api-key")
+
+        let (data, response) = try await URLSession.shared.data(for: request)
+
+        guard let httpResponse = response as? HTTPURLResponse else {
+            throw ApolloError.invalidResponse
+        }
+
+        guard httpResponse.statusCode == 200 else {
+            if httpResponse.statusCode == 401 {
+                throw ApolloError.unauthorized
+            }
+            throw ApolloError.serverError(httpResponse.statusCode)
+        }
+
+        // Parse the response to get credits info
+        guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            throw ApolloError.invalidResponse
+        }
+
+        // Apollo health endpoint returns current_credits_used and plan info
+        let creditsUsed = json["current_credits_used"] as? Int ?? 0
+        let creditsLimit = json["credits_limit"] as? Int ?? 0
+
+        // If credits_limit is 0, try to get from plan
+        var totalCredits = creditsLimit
+        if totalCredits == 0, let plan = json["plan"] as? [String: Any] {
+            totalCredits = plan["credits"] as? Int ?? 0
+        }
+
+        return CreditsInfo(
+            used: creditsUsed,
+            total: totalCredits,
+            remaining: max(0, totalCredits - creditsUsed)
+        )
+    }
+
     // MARK: - API Methods
 
     /// Enrich a lead using their LinkedIn URL

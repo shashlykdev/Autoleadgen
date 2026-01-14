@@ -37,7 +37,7 @@ class LeadFinderViewModel: ObservableObject {
 
     // AI Settings (read from AppStorage)
     @AppStorage("aiEnabled") private var aiEnabled: Bool = false
-    @AppStorage("selectedModelId") private var selectedModelId: String = ""
+    @AppStorage("globalSelectedModelId") private var selectedModelId: String = ""
     @AppStorage("sampleMessage") private var sampleMessage: String = ""
 
     private let scraperService = GoogleScraperService()

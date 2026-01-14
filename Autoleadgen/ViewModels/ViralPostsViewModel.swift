@@ -44,8 +44,8 @@ class ViralPostsViewModel: ObservableObject {
     @Published var icpKeywordsText: String = ""
     @Published var icpExcludeKeywordsText: String = ""
 
-    // MARK: - AI Settings
-    @AppStorage("viralSelectedModelId") private var selectedModelId: String = ""
+    // MARK: - AI Settings (uses global model from MainViewModel)
+    @AppStorage("globalSelectedModelId") private var selectedModelId: String = ""
     @AppStorage("viralUserVoice") private var storedUserVoice: String = ""
 
     // MARK: - Services
@@ -97,13 +97,6 @@ class ViralPostsViewModel: ObservableObject {
 
     var hasEngagers: Bool {
         !engagers.isEmpty
-    }
-
-    var selectedModelIdBinding: Binding<String> {
-        Binding(
-            get: { self.selectedModelId },
-            set: { self.selectedModelId = $0 }
-        )
     }
 
     // MARK: - Phase 1A: Extract Content from URLs

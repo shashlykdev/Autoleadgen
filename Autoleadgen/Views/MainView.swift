@@ -27,7 +27,13 @@ struct MainView: View {
                     Text("Settings").tag(5)
                 }
                 .pickerStyle(.segmented)
-                .padding()
+                .padding(.horizontal)
+                .padding(.top)
+
+                // Global AI Model Selector
+                globalModelSelector
+                    .padding(.horizontal)
+                    .padding(.bottom, 8)
 
                 // Tab content
                 TabView(selection: $selectedTab) {
@@ -80,6 +86,47 @@ struct MainView: View {
             allowedContentTypes: [.commaSeparatedText, UTType(filenameExtension: "csv")!],
             onCompletion: handleFileSelection
         )
+        .onAppear {
+            viewModel.loadAIModels()
+        }
+    }
+
+    // MARK: - Global AI Model Selector
+
+    private var globalModelSelector: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "cpu")
+                .foregroundColor(.secondary)
+                .font(.caption)
+
+            Text("AI Model:")
+                .font(.caption)
+                .foregroundColor(.secondary)
+
+            if viewModel.isLoadingModels {
+                ProgressView()
+                    .scaleEffect(0.6)
+                    .frame(width: 16, height: 16)
+            } else {
+                Picker("", selection: $viewModel.selectedModelId) {
+                    Text("Select model").tag("")
+                    ForEach(viewModel.availableModels) { model in
+                        Text(model.name).tag(model.id)
+                    }
+                }
+                .frame(maxWidth: .infinity)
+            }
+
+            if !viewModel.selectedModelId.isEmpty {
+                Image(systemName: "checkmark.circle.fill")
+                    .foregroundColor(.green)
+                    .font(.caption)
+            }
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 6)
+        .background(Color(NSColor.controlBackgroundColor))
+        .cornerRadius(6)
     }
 
     // MARK: - Browser Toolbar

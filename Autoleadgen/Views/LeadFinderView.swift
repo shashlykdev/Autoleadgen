@@ -16,6 +16,9 @@ struct LeadFinderView: View {
     @State private var apolloKeyLoaded: Bool = false
     @State private var apolloTestResult: String?
     @State private var isTestingApollo: Bool = false
+    @State private var apolloCreditsUsed: Int = 0
+    @State private var apolloCreditsTotal: Int = 0
+    @State private var isLoadingCredits: Bool = false
 
     // Models state
     @State private var availableModels: [CloudKeyStorageService.AIModel] = []
@@ -379,13 +382,20 @@ struct LeadFinderView: View {
                     .font(.subheadline)
                     .fontWeight(.medium)
 
-                Text("100 free credits/month")
-                    .font(.caption)
-                    .foregroundColor(.secondary)
-                    .padding(.horizontal, 6)
-                    .padding(.vertical, 2)
-                    .background(Color.blue.opacity(0.1))
-                    .cornerRadius(4)
+                // Credits display
+                if isLoadingCredits {
+                    ProgressView()
+                        .scaleEffect(0.6)
+                        .frame(width: 12, height: 12)
+                } else if apolloCreditsTotal > 0 {
+                    Text("\(apolloCreditsUsed) / \(apolloCreditsTotal) credits used")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 2)
+                        .background(Color.blue.opacity(0.1))
+                        .cornerRadius(4)
+                }
 
                 Spacer()
 
@@ -488,6 +498,8 @@ struct LeadFinderView: View {
                             viewModel.apolloEnabled = true
                         }
                     }
+                    // Fetch credits after key is loaded
+                    await loadApolloCredits(apiKey: key)
                 } else {
                     await MainActor.run {
                         apolloKeyLoaded = true
@@ -499,6 +511,25 @@ struct LeadFinderView: View {
                     apolloKeyLoaded = true
                     isLoadingApolloKey = false
                 }
+            }
+        }
+    }
+
+    private func loadApolloCredits(apiKey: String) async {
+        await MainActor.run {
+            isLoadingCredits = true
+        }
+
+        do {
+            let credits = try await ApolloEnrichmentService.shared.fetchCredits(apiKey: apiKey)
+            await MainActor.run {
+                apolloCreditsUsed = credits.used
+                apolloCreditsTotal = credits.total
+                isLoadingCredits = false
+            }
+        } catch {
+            await MainActor.run {
+                isLoadingCredits = false
             }
         }
     }

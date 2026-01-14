@@ -6,8 +6,6 @@ struct ViralPostsView: View {
 
     @State private var connectionNote: String = ""
     @State private var showConnectionNoteSheet: Bool = false
-    @State private var availableModels: [CloudKeyStorageService.AIModel] = []
-    @State private var isLoadingModels: Bool = false
 
     var body: some View {
         ScrollView {
@@ -34,7 +32,6 @@ struct ViralPostsView: View {
         }
         .onAppear {
             viewModel.onLeadsReady = onAddToContacts
-            if availableModels.isEmpty { loadModels() }
         }
         .sheet(isPresented: $showConnectionNoteSheet) {
             connectionNoteSheet
@@ -154,19 +151,6 @@ struct ViralPostsView: View {
                 .foregroundColor(.secondary)
 
             HStack {
-                // AI Model Selection
-                if isLoadingModels {
-                    ProgressView().scaleEffect(0.7)
-                } else {
-                    Picker("Model:", selection: viewModel.selectedModelIdBinding) {
-                        Text("Select model").tag("")
-                        ForEach(availableModels) { model in
-                            Text(model.name).tag(model.id)
-                        }
-                    }
-                    .frame(maxWidth: 200)
-                }
-
                 Button("Generate Posts") {
                     viewModel.generateFromTopics()
                 }
@@ -214,28 +198,6 @@ struct ViralPostsView: View {
             Text("Step 2: Generate & Refine Content")
                 .font(.subheadline)
                 .fontWeight(.medium)
-
-            // AI Model Selection (if coming from URLs)
-            if viewModel.selectedSourceTab == .urls {
-                HStack {
-                    Text("AI Model:")
-                        .font(.caption)
-
-                    if isLoadingModels {
-                        ProgressView().scaleEffect(0.7)
-                    } else {
-                        Picker("", selection: viewModel.selectedModelIdBinding) {
-                            Text("Select model").tag("")
-                            ForEach(availableModels) { model in
-                                Text(model.name).tag(model.id)
-                            }
-                        }
-                        .frame(maxWidth: 250)
-                    }
-
-                    Spacer()
-                }
-            }
 
             // User Voice Style
             VStack(alignment: .leading, spacing: 4) {
@@ -542,32 +504,6 @@ struct ViralPostsView: View {
         }
         .padding()
         .frame(width: 400)
-    }
-
-    // MARK: - Load Models
-
-    private func loadModels() {
-        isLoadingModels = true
-        Task {
-            do {
-                var models = try await CloudKeyStorageService.shared.fetchModels()
-                if AIMessageService.isAppleIntelligenceAvailable {
-                    models.insert(CloudKeyStorageService.AIModel(
-                        id: "apple-intelligence",
-                        name: "Apple Intelligence (On-Device)",
-                        provider: "apple"
-                    ), at: 0)
-                }
-                await MainActor.run {
-                    availableModels = models
-                    isLoadingModels = false
-                }
-            } catch {
-                await MainActor.run {
-                    isLoadingModels = false
-                }
-            }
-        }
     }
 }
 

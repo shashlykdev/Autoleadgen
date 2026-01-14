@@ -17,6 +17,11 @@ class MainViewModel: ObservableObject {
     @Published var isLoggedIn: Bool = false
     @Published var showingFilePicker: Bool = false
 
+    // Global AI Model Selection
+    @Published var availableModels: [CloudKeyStorageService.AIModel] = []
+    @Published var isLoadingModels: Bool = false
+    @AppStorage("globalSelectedModelId") var selectedModelId: String = ""
+
     private var cancellables = Set<AnyCancellable>()
 
     init() {
@@ -157,5 +162,30 @@ class MainViewModel: ObservableObject {
             }
         }
         loggingService.info("Added \(leads.count) leads to automation queue")
+    }
+
+    // MARK: - Global AI Model Management
+
+    func loadAIModels() {
+        guard !isLoadingModels else { return }
+        isLoadingModels = true
+
+        Task {
+            do {
+                var models = try await CloudKeyStorageService.shared.fetchModels()
+                if AIMessageService.isAppleIntelligenceAvailable {
+                    models.insert(CloudKeyStorageService.AIModel(
+                        id: "apple-intelligence",
+                        name: "Apple Intelligence (On-Device)",
+                        provider: "apple"
+                    ), at: 0)
+                }
+                self.availableModels = models
+                self.isLoadingModels = false
+            } catch {
+                self.isLoadingModels = false
+                loggingService.error("Failed to load AI models: \(error.localizedDescription)")
+            }
+        }
     }
 }
