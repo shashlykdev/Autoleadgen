@@ -175,7 +175,7 @@ struct LeadFinderView: View {
 
             HStack(spacing: 4) {
                 Text("Target:")
-                Stepper("\(viewModel.targetLeadsCount) leads", value: $viewModel.targetLeadsCount, in: 10...500, step: 10)
+                Stepper("\(viewModel.targetLeadsCount) leads", value: $viewModel.targetLeadsCount, in: 1...500, step: 1)
                     .frame(width: 140)
             }
             .disabled(viewModel.isWorking)
