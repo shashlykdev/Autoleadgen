@@ -4,9 +4,9 @@ struct LeadFinderView: View {
     @ObservedObject var viewModel: LeadFinderViewModel
     let onAddContacts: ([Lead]) -> Void
 
-    // AI Settings
+    // AI Settings (uses global model from MainViewModel)
     @AppStorage("aiEnabled") private var aiEnabled: Bool = false
-    @AppStorage("selectedModelId") private var selectedModelId: String = ""
+    @AppStorage("globalSelectedModelId") private var selectedModelId: String = ""
     @AppStorage("sampleMessage") private var sampleMessage: String = ""
 
     // Apollo Settings
@@ -19,11 +19,6 @@ struct LeadFinderView: View {
     @State private var apolloCreditsUsed: Int = 0
     @State private var apolloCreditsTotal: Int = 0
     @State private var isLoadingCredits: Bool = false
-
-    // Models state
-    @State private var availableModels: [CloudKeyStorageService.AIModel] = []
-    @State private var isLoadingModels: Bool = false
-    @State private var modelsError: String?
 
     var body: some View {
         ScrollView {
@@ -84,10 +79,6 @@ struct LeadFinderView: View {
             viewModel.onContactsReady = { contacts in
                 onAddContacts(contacts)
             }
-
-            if availableModels.isEmpty {
-                loadModels()
-            }
         }
     }
 
@@ -113,7 +104,7 @@ struct LeadFinderView: View {
         }
     }
 
-    // MARK: - AI Model Selection
+    // MARK: - AI Message Generation
 
     private var aiModelSection: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -124,146 +115,45 @@ struct LeadFinderView: View {
                 Spacer()
                 Toggle("", isOn: $aiEnabled)
                     .labelsHidden()
+                    .disabled(selectedModelId.isEmpty)
             }
 
             if aiEnabled {
-                HStack(spacing: 12) {
-                    // Model picker
-                    if isLoadingModels {
-                        ProgressView()
-                            .scaleEffect(0.8)
-                        Text("Loading models...")
+                if selectedModelId.isEmpty {
+                    HStack {
+                        Image(systemName: "exclamationmark.triangle")
+                            .foregroundColor(.orange)
+                        Text("Please select an AI model above")
                             .font(.caption)
                             .foregroundColor(.secondary)
-                    } else if let error = modelsError {
-                        HStack {
-                            Image(systemName: "exclamationmark.triangle")
-                                .foregroundColor(.orange)
-                            Text(error)
-                                .font(.caption)
-                                .foregroundColor(.secondary)
-                            Button("Retry") {
-                                loadModels()
-                            }
-                            .buttonStyle(.bordered)
-                            .controlSize(.small)
-                        }
-                    } else {
-                        Picker("Model", selection: $selectedModelId) {
-                            Text("Select a model").tag("")
-                            ForEach(groupedModels, id: \.key) { provider, models in
-                                Section(header: Text(provider.capitalized)) {
-                                    ForEach(models) { model in
-                                        Text(model.name).tag(model.id)
-                                    }
-                                }
-                            }
-                        }
-                        .frame(maxWidth: 300)
-
-                        // Status indicator
-                        if !selectedModelId.isEmpty {
-                            Image(systemName: "checkmark.circle.fill")
-                                .foregroundColor(.green)
-                        }
-
-                        Spacer()
-
-                        Button {
-                            loadModels()
-                        } label: {
-                            Image(systemName: "arrow.clockwise")
-                        }
-                        .buttonStyle(.bordered)
-                        .controlSize(.small)
-                        .help("Refresh models")
+                    }
+                } else {
+                    // Sample message field
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Sample Message (for AI reference)")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                        TextEditor(text: $sampleMessage)
+                            .font(.system(.body, design: .monospaced))
+                            .frame(minHeight: 80, maxHeight: 120)
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 4)
+                                    .stroke(Color.gray.opacity(0.3), lineWidth: 1)
+                            )
+                        Text("Provide a sample message style for the AI to follow when generating personalized messages")
+                            .font(.caption2)
+                            .foregroundColor(.secondary)
                     }
                 }
-
-                if !selectedModelId.isEmpty, let model = availableModels.first(where: { $0.id == selectedModelId }) {
-                    Text("Using \(model.provider.capitalized) • \(model.name)")
-                        .font(.caption)
-                        .foregroundColor(.secondary)
-                }
-
-                // Sample message field
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("Sample Message (for AI reference)")
-                        .font(.caption)
-                        .foregroundColor(.secondary)
-                    TextEditor(text: $sampleMessage)
-                        .font(.system(.body, design: .monospaced))
-                        .frame(minHeight: 80, maxHeight: 120)
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 4)
-                                .stroke(Color.gray.opacity(0.3), lineWidth: 1)
-                        )
-                    Text("Provide a sample message style for the AI to follow when generating personalized messages")
-                        .font(.caption2)
-                        .foregroundColor(.secondary)
-                }
+            } else if selectedModelId.isEmpty {
+                Text("Select an AI model above to enable message generation")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
             }
         }
         .padding(10)
         .background(Color(NSColor.controlBackgroundColor))
         .cornerRadius(8)
-    }
-
-    private var groupedModels: [(key: String, value: [CloudKeyStorageService.AIModel])] {
-        Dictionary(grouping: availableModels, by: { $0.provider })
-            .sorted { $0.key < $1.key }
-            .map { (key: $0.key, value: $0.value) }
-    }
-
-    private func loadModels() {
-        isLoadingModels = true
-        modelsError = nil
-
-        Task {
-            do {
-                var models = try await CloudKeyStorageService.shared.fetchModels()
-
-                // Add Apple Intelligence if available (on-device, no API key needed)
-                if AIMessageService.isAppleIntelligenceAvailable {
-                    let appleModel = CloudKeyStorageService.AIModel(
-                        id: "apple-intelligence",
-                        name: "Apple Intelligence (On-Device)",
-                        provider: "apple"
-                    )
-                    models.insert(appleModel, at: 0)
-                }
-
-                await MainActor.run {
-                    availableModels = models
-                    isLoadingModels = false
-
-                    // Auto-select Apple Intelligence if available and none selected
-                    if selectedModelId.isEmpty {
-                        if AIMessageService.isAppleIntelligenceAvailable {
-                            selectedModelId = "apple-intelligence"
-                        } else if let first = models.first {
-                            selectedModelId = first.id
-                        }
-                    }
-                }
-            } catch {
-                await MainActor.run {
-                    // Even on error, add Apple Intelligence if available
-                    if AIMessageService.isAppleIntelligenceAvailable {
-                        let appleModel = CloudKeyStorageService.AIModel(
-                            id: "apple-intelligence",
-                            name: "Apple Intelligence (On-Device)",
-                            provider: "apple"
-                        )
-                        availableModels = [appleModel]
-                        modelsError = nil
-                    } else {
-                        modelsError = error.localizedDescription
-                    }
-                    isLoadingModels = false
-                }
-            }
-        }
     }
 
     // MARK: - Search Controls
