@@ -430,19 +430,12 @@ struct LeadFinderView: View {
 
         Task {
             do {
-                // Test with a sample LinkedIn URL
-                let result = try await ApolloEnrichmentService.shared.enrichByLinkedIn(
-                    linkedInURL: "https://www.linkedin.com/in/test",
-                    firstName: "Test",
-                    lastName: "User",
-                    apiKey: apolloApiKey
-                )
+                // Test API key by fetching credits (uses health endpoint, no credits consumed)
+                let credits = try await ApolloEnrichmentService.shared.fetchCredits(apiKey: apolloApiKey)
                 await MainActor.run {
-                    if result.wasFound {
-                        apolloTestResult = "Success! API key valid. Email: \(result.email ?? "none found")"
-                    } else {
-                        apolloTestResult = "Success! API key valid (test profile not in Apollo DB)"
-                    }
+                    apolloCreditsUsed = credits.used
+                    apolloCreditsTotal = credits.total
+                    apolloTestResult = "Success! API key valid. Credits: \(credits.remaining) remaining"
                     isTestingApollo = false
                 }
             } catch let error as ApolloError {
